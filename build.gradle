@@ -104,7 +104,7 @@ ext {
 
   defaultMaxHeapSize = "2g"
   defaultJvmArgs = ["-Xss4m", "-XX:+UseParallelGC"]
-  
+
   // "JEP 403: Strongly Encapsulate JDK Internals" causes some tests to fail when they try
   // to access internals (often via mocking libraries). We use `--add-opens` as a workaround
   // for now and we'll fix it properly (where possible) via KAFKA-13275.
@@ -2568,6 +2568,8 @@ project(':connect:mirror') {
     implementation libs.argparse4j
     implementation libs.jacksonAnnotations
     implementation libs.slf4jApi
+    implementation libs.zookeeper
+    implementation libs.curator
 
     testImplementation libs.junitJupiter
     testImplementation libs.mockitoCore

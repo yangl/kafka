@@ -16,6 +16,11 @@
  */
 package org.apache.kafka.connect.mirror;
 
+import java.nio.charset.StandardCharsets;
+import org.apache.curator.RetryPolicy;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.retry.BoundedExponentialBackoffRetry;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.source.SourceTask;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -52,6 +57,9 @@ public class MirrorSourceTask extends SourceTask {
 
     private static final int MAX_OUTSTANDING_OFFSET_SYNCS = 10;
 
+    private static final String MM2_SOURCE_ZK_KEY = "SF_MM2_SOURCE_ZK";
+    private static final String MM2_SOURCE_CONSUMER_GROUP_ID_KEY = "SF_MM2_SOURCE_CONSUMER_GROUP_ID";
+
     private KafkaConsumer<byte[], byte[]> consumer;
     private KafkaProducer<byte[], byte[]> offsetProducer;
     private String sourceClusterAlias;
@@ -64,6 +72,17 @@ public class MirrorSourceTask extends SourceTask {
     private boolean stopping = false;
     private Semaphore outstandingOffsetSyncs;
     private Semaphore consumerAccess;
+
+    // 该woker运行的主题分区列表
+    private Set<TopicPartition> taskTopicPartitions;
+
+    // 上游集群消费组zk客户端
+    private CuratorFramework sourceConsumerZkClient;
+    // 上游集群消费组zk连接串
+    private String sourceConsumerZkConnectString;
+    // 上游集群同步消费组名称
+    private String sourceConsumerGroupId;
+
 
     public MirrorSourceTask() {}
 
@@ -92,7 +111,7 @@ public class MirrorSourceTask extends SourceTask {
         offsetSyncsTopic = config.offsetSyncsTopic();
         consumer = MirrorUtils.newConsumer(config.sourceConsumerConfig());
         offsetProducer = MirrorUtils.newProducer(config.offsetSyncsTopicProducerConfig());
-        Set<TopicPartition> taskTopicPartitions = config.taskTopicPartitions();
+        taskTopicPartitions = config.taskTopicPartitions();
         Map<TopicPartition, Long> topicPartitionOffsets = loadOffsets(taskTopicPartitions);
         consumer.assign(topicPartitionOffsets.keySet());
         log.info("Starting with {} previously uncommitted partitions.", topicPartitionOffsets.entrySet().stream()
@@ -101,11 +120,34 @@ public class MirrorSourceTask extends SourceTask {
         topicPartitionOffsets.forEach(consumer::seek);
         log.info("{} replicating {} topic-partitions {}->{}: {}.", Thread.currentThread().getName(),
             taskTopicPartitions.size(), sourceClusterAlias, config.targetClusterAlias(), taskTopicPartitions);
+
+        sourceConsumerZkConnectString = System.getProperty(MM2_SOURCE_ZK_KEY, System.getenv(MM2_SOURCE_ZK_KEY));
+        sourceConsumerGroupId = System
+                .getProperty(MM2_SOURCE_CONSUMER_GROUP_ID_KEY, System.getenv(MM2_SOURCE_CONSUMER_GROUP_ID_KEY));
+
+        RetryPolicy retryPolicy = new BoundedExponentialBackoffRetry(100, 10000, 10);
+        sourceConsumerZkClient = CuratorFrameworkFactory.newClient(sourceConsumerZkConnectString, retryPolicy);
+        sourceConsumerZkClient.start();
     }
 
     @Override
     public void commit() {
         // nop
+        taskTopicPartitions.forEach(topicPartition -> {
+            Long upstreamOffset = loadOffset(topicPartition);
+            if (upstreamOffset != null && upstreamOffset.longValue() > 0) {
+                byte[] data = String.valueOf(upstreamOffset).getBytes(StandardCharsets.UTF_8);
+                String path =
+                        "/consumers/" + sourceConsumerGroupId + "/offsets/" + topicPartition.topic() + "/" + topicPartition.partition();
+                try {
+                    sourceConsumerZkClient.create().orSetData().creatingParentContainersIfNeeded().forPath(path, data);
+                } catch (Exception e) {
+                    log.info("设置消费组offset报错，消费组{}，主题分区{}-{}，位点offset{}", sourceConsumerGroupId, topicPartition.topic(),
+                            topicPartition.partition(), upstreamOffset);
+                }
+            }
+
+        });
     }
 
     @Override
@@ -116,14 +158,14 @@ public class MirrorSourceTask extends SourceTask {
         try {
             consumerAccess.acquire();
         } catch (InterruptedException e) {
-            log.warn("Interrupted waiting for access to consumer. Will try closing anyway."); 
+            log.warn("Interrupted waiting for access to consumer. Will try closing anyway.");
         }
         Utils.closeQuietly(consumer, "source consumer");
         Utils.closeQuietly(offsetProducer, "offset producer");
         Utils.closeQuietly(metrics, "metrics");
         log.info("Stopping {} took {} ms.", Thread.currentThread().getName(), System.currentTimeMillis() - start);
     }
-   
+
     @Override
     public String version() {
         return "1";
@@ -167,7 +209,7 @@ public class MirrorSourceTask extends SourceTask {
             consumerAccess.release();
         }
     }
- 
+
     @Override
     public void commitRecord(SourceRecord record, RecordMetadata metadata) {
         try {
@@ -221,7 +263,7 @@ public class MirrorSourceTask extends SourceTask {
             outstandingOffsetSyncs.release();
         });
     }
- 
+
     private Map<TopicPartition, Long> loadOffsets(Set<TopicPartition> topicPartitions) {
         return topicPartitions.stream().collect(Collectors.toMap(x -> x, this::loadOffset));
     }
@@ -232,7 +274,7 @@ public class MirrorSourceTask extends SourceTask {
         return MirrorUtils.unwrapOffset(wrappedOffset) + 1;
     }
 
-    // visible for testing 
+    // visible for testing
     SourceRecord convertRecord(ConsumerRecord<byte[], byte[]> record) {
         String targetTopic = formatRemoteTopic(record.topic());
         Headers headers = convertHeaders(record);
