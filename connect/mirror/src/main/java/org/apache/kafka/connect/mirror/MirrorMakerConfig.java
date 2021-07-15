@@ -16,27 +16,28 @@
  */
 package org.apache.kafka.connect.mirror;
 
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_CONSUMER_GROUP_ID_KEY;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
-import org.apache.kafka.common.utils.Utils;
+import java.util.Set;
+import java.util.stream.Collectors;
+import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
-import org.apache.kafka.common.config.ConfigDef.Type;
 import org.apache.kafka.common.config.ConfigDef.Importance;
-import org.apache.kafka.common.config.provider.ConfigProvider;
+import org.apache.kafka.common.config.ConfigDef.Type;
 import org.apache.kafka.common.config.ConfigTransformer;
-import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.common.config.provider.ConfigProvider;
+import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.connect.runtime.WorkerConfig;
 import org.apache.kafka.connect.runtime.distributed.DistributedConfig;
 import org.apache.kafka.connect.runtime.isolation.Plugins;
-
-import java.util.Map;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Set;
-import java.util.HashSet;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.stream.Collectors;
 
 /** Top-level config describing replication flows between multiple Kafka clusters.
  *
@@ -183,7 +184,9 @@ public class MirrorMakerConfig extends AbstractConfig {
         props.putAll(stringsWithPrefix(CONFIG_PROVIDERS_CONFIG));
 
         // fill in reasonable defaults
-        props.putIfAbsent(GROUP_ID_CONFIG, sourceAndTarget.source() + "-mm2");
+        // props.putIfAbsent(GROUP_ID_CONFIG, sourceAndTarget.source() + "-mm2");
+        props.putIfAbsent(GROUP_ID_CONFIG,
+                System.getProperty(MM2_CONSUMER_GROUP_ID_KEY, System.getenv(MM2_CONSUMER_GROUP_ID_KEY)));
         props.putIfAbsent(DistributedConfig.OFFSET_STORAGE_TOPIC_CONFIG, "mm2-offsets."
                 + sourceAndTarget.source() + ".internal");
         props.putIfAbsent(DistributedConfig.STATUS_STORAGE_TOPIC_CONFIG, "mm2-status."

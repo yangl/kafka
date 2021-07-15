@@ -16,48 +16,53 @@
  */
 package org.apache.kafka.connect.mirror;
 
+
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_CONSUMER_GROUP_ID_KEY;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_TARGET_ZK_KEY;
+
+import java.io.File;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
+import net.sourceforge.argparse4j.ArgumentParsers;
+import net.sourceforge.argparse4j.impl.Arguments;
+import net.sourceforge.argparse4j.inf.ArgumentParser;
+import net.sourceforge.argparse4j.inf.ArgumentParserException;
+import net.sourceforge.argparse4j.inf.Namespace;
+import org.apache.curator.RetryPolicy;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.retry.BoundedExponentialBackoffRetry;
+import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
-import org.apache.kafka.common.utils.Exit;
+import org.apache.kafka.connect.connector.policy.AllConnectorClientConfigOverridePolicy;
+import org.apache.kafka.connect.connector.policy.ConnectorClientConfigOverridePolicy;
 import org.apache.kafka.connect.runtime.Herder;
-import org.apache.kafka.connect.runtime.isolation.Plugins;
 import org.apache.kafka.connect.runtime.Worker;
 import org.apache.kafka.connect.runtime.WorkerConfigTransformer;
 import org.apache.kafka.connect.runtime.distributed.DistributedConfig;
 import org.apache.kafka.connect.runtime.distributed.DistributedHerder;
 import org.apache.kafka.connect.runtime.distributed.NotLeaderException;
-import org.apache.kafka.connect.storage.KafkaOffsetBackingStore;
-import org.apache.kafka.connect.storage.StatusBackingStore;
-import org.apache.kafka.connect.storage.KafkaStatusBackingStore;
+import org.apache.kafka.connect.runtime.isolation.Plugins;
 import org.apache.kafka.connect.storage.ConfigBackingStore;
-import org.apache.kafka.connect.storage.KafkaConfigBackingStore;
 import org.apache.kafka.connect.storage.Converter;
+import org.apache.kafka.connect.storage.KafkaConfigBackingStore;
+import org.apache.kafka.connect.storage.KafkaOffsetBackingStore;
+import org.apache.kafka.connect.storage.KafkaStatusBackingStore;
+import org.apache.kafka.connect.storage.StatusBackingStore;
 import org.apache.kafka.connect.util.ConnectUtils;
-import org.apache.kafka.connect.connector.policy.AllConnectorClientConfigOverridePolicy;
-import org.apache.kafka.connect.connector.policy.ConnectorClientConfigOverridePolicy;
-
 import org.apache.kafka.connect.util.SharedTopicAdmin;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import net.sourceforge.argparse4j.impl.Arguments;
-import net.sourceforge.argparse4j.inf.Namespace;
-import net.sourceforge.argparse4j.inf.ArgumentParser;
-import net.sourceforge.argparse4j.inf.ArgumentParserException;
-import net.sourceforge.argparse4j.ArgumentParsers;
-
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.Map;
-import java.util.HashMap;
-import java.util.Set;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Arrays;
-import java.util.Properties;
-import java.util.stream.Collectors;
-import java.io.File;
 
 /**
  *  Entry point for "MirrorMaker 2.0".
@@ -97,7 +102,7 @@ public class MirrorMaker {
         MirrorSourceConnector.class,
         MirrorHeartbeatConnector.class,
         MirrorCheckpointConnector.class);
- 
+
     private final Map<SourceAndTarget, Herder> herders = new HashMap<>();
     private CountDownLatch startLatch;
     private CountDownLatch stopLatch;
@@ -293,12 +298,35 @@ public class MirrorMaker {
         File configFile = ns.get("config");
         List<String> clusters = ns.getList("clusters");
         try {
+
+            log.info("SF Kafka MirrorMaker2 循环同步探测中 ...");
+            RetryPolicy retryPolicy = new BoundedExponentialBackoffRetry(100, 10000, 10);
+
+            String syncConsumerGroupId = System
+                    .getProperty(MM2_CONSUMER_GROUP_ID_KEY, System.getenv(MM2_CONSUMER_GROUP_ID_KEY));
+            String targetClusterZkConnectString = System
+                    .getProperty(MM2_TARGET_ZK_KEY, System.getenv(MM2_TARGET_ZK_KEY));
+            CuratorFramework targetZkClient = CuratorFrameworkFactory
+                    .newClient(targetClusterZkConnectString, retryPolicy);
+            targetZkClient.start();
+            List<String> consumerIds = targetZkClient.getChildren()
+                    .forPath("/consumers/" + syncConsumerGroupId + "/ids");
+            targetZkClient.close();
+            if (consumerIds != null && consumerIds.size() > 0) {
+
+                String msg = String.format("循环同步了！请确认下游集群[%s]同步消费组[%s]是否还在运行中？", targetClusterZkConnectString,
+                        syncConsumerGroupId);
+                System.err.println(msg);
+                Exit.exit(4);
+            }
+            log.info("SF Kafka MirrorMaker2 循环同步检测通过 ...");
+
             log.info("Kafka MirrorMaker initializing ...");
 
             Properties props = Utils.loadProps(configFile.getPath());
             Map<String, String> config = Utils.propsToStringMap(props);
             MirrorMaker mirrorMaker = new MirrorMaker(config, clusters, Time.SYSTEM);
-            
+
             try {
                 mirrorMaker.start();
             } catch (Exception e) {

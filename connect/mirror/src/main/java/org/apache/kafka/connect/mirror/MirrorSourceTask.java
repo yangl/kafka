@@ -16,39 +16,43 @@
  */
 package org.apache.kafka.connect.mirror;
 
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.CONSUMER_ZK_PATH_FORMAT;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_CONSUMER_GROUP_ID_KEY;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_SOURCE_ZK_KEY;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.REPLICATOR_ID_KEY;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.REPLICATOR_ID_SPLIT_KEY;
+
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Semaphore;
+import java.util.stream.Collectors;
 import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.BoundedExponentialBackoffRetry;
-import org.apache.kafka.connect.data.Schema;
-import org.apache.kafka.connect.source.SourceTask;
-import org.apache.kafka.connect.source.SourceRecord;
-import org.apache.kafka.connect.header.Headers;
-import org.apache.kafka.connect.header.ConnectHeaders;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.clients.producer.RecordMetadata;
-import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.header.Header;
-import org.apache.kafka.common.errors.WakeupException;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.WakeupException;
+import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.utils.Utils;
-
+import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.header.ConnectHeaders;
+import org.apache.kafka.connect.header.Headers;
+import org.apache.kafka.connect.source.SourceRecord;
+import org.apache.kafka.connect.source.SourceTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.Map;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Set;
-import java.util.ArrayList;
-import java.util.stream.Collectors;
-import java.util.concurrent.Semaphore;
-import java.time.Duration;
 
 /** Replicates a set of topic-partitions. */
 public class MirrorSourceTask extends SourceTask {
@@ -57,12 +61,10 @@ public class MirrorSourceTask extends SourceTask {
 
     private static final int MAX_OUTSTANDING_OFFSET_SYNCS = 10;
 
-    private static final String MM2_SOURCE_ZK_KEY = "SF_MM2_SOURCE_ZK";
-    private static final String MM2_SOURCE_CONSUMER_GROUP_ID_KEY = "SF_MM2_SOURCE_CONSUMER_GROUP_ID";
-
     private KafkaConsumer<byte[], byte[]> consumer;
     private KafkaProducer<byte[], byte[]> offsetProducer;
     private String sourceClusterAlias;
+    private String targetClusterAlias;
     private String offsetSyncsTopic;
     private Duration pollTimeout;
     private long maxOffsetLag;
@@ -76,12 +78,13 @@ public class MirrorSourceTask extends SourceTask {
     // 该woker运行的主题分区列表
     private Set<TopicPartition> taskTopicPartitions;
 
+    // 上游集群zk连接串
+    private String sourceClusterZkConnectString;
     // 上游集群消费组zk客户端
-    private CuratorFramework sourceConsumerZkClient;
-    // 上游集群消费组zk连接串
-    private String sourceConsumerZkConnectString;
-    // 上游集群同步消费组名称
-    private String sourceConsumerGroupId;
+    private CuratorFramework sourceZkClient;
+
+    // 同步消费组名称
+    private String syncConsumerGroupId;
 
 
     public MirrorSourceTask() {}
@@ -103,6 +106,7 @@ public class MirrorSourceTask extends SourceTask {
         outstandingOffsetSyncs = new Semaphore(MAX_OUTSTANDING_OFFSET_SYNCS);
         consumerAccess = new Semaphore(1);  // let one thread at a time access the consumer
         sourceClusterAlias = config.sourceClusterAlias();
+        targetClusterAlias = config.targetClusterAlias();
         metrics = config.metrics();
         pollTimeout = config.consumerPollTimeout();
         maxOffsetLag = config.maxOffsetLag();
@@ -121,29 +125,30 @@ public class MirrorSourceTask extends SourceTask {
         log.info("{} replicating {} topic-partitions {}->{}: {}.", Thread.currentThread().getName(),
             taskTopicPartitions.size(), sourceClusterAlias, config.targetClusterAlias(), taskTopicPartitions);
 
-        sourceConsumerZkConnectString = System.getProperty(MM2_SOURCE_ZK_KEY, System.getenv(MM2_SOURCE_ZK_KEY));
-        sourceConsumerGroupId = System
-                .getProperty(MM2_SOURCE_CONSUMER_GROUP_ID_KEY, System.getenv(MM2_SOURCE_CONSUMER_GROUP_ID_KEY));
-
+        // 消费组
+        syncConsumerGroupId = System
+                .getProperty(MM2_CONSUMER_GROUP_ID_KEY, System.getenv(MM2_CONSUMER_GROUP_ID_KEY));
+        // 上游zk初始化
+        sourceClusterZkConnectString = System.getProperty(MM2_SOURCE_ZK_KEY, System.getenv(MM2_SOURCE_ZK_KEY));
         RetryPolicy retryPolicy = new BoundedExponentialBackoffRetry(100, 10000, 10);
-        sourceConsumerZkClient = CuratorFrameworkFactory.newClient(sourceConsumerZkConnectString, retryPolicy);
-        sourceConsumerZkClient.start();
+        sourceZkClient = CuratorFrameworkFactory.newClient(sourceClusterZkConnectString, retryPolicy);
+        sourceZkClient.start();
+
     }
 
     @Override
     public void commit() {
-        // nop
+        // 保存消费组offset至zk，兼容现有zk消费组offset同步机制
         taskTopicPartitions.forEach(topicPartition -> {
             Long upstreamOffset = loadOffset(topicPartition);
             if (upstreamOffset != null && upstreamOffset.longValue() > 0) {
                 byte[] data = String.valueOf(upstreamOffset).getBytes(StandardCharsets.UTF_8);
-                String path =
-                        "/consumers/" + sourceConsumerGroupId + "/offsets/" + topicPartition.topic() + "/" + topicPartition.partition();
+                String path = getConsumerZkPath(topicPartition);
                 try {
-                    sourceConsumerZkClient.create().orSetData().creatingParentContainersIfNeeded().forPath(path, data);
+                    sourceZkClient.create().orSetData().creatingParentContainersIfNeeded().forPath(path, data);
                 } catch (Exception e) {
-                    log.info("设置消费组offset报错，消费组{}，主题分区{}-{}，位点offset{}", sourceConsumerGroupId, topicPartition.topic(),
-                            topicPartition.partition(), upstreamOffset);
+                    log.info("设置消费组offset报错，消费组{}，主题分区{}-{}，位点offset{}", syncConsumerGroupId, topicPartition.topic(),
+                            topicPartition.partition(), upstreamOffset, e);
                 }
             }
 
@@ -183,11 +188,36 @@ public class MirrorSourceTask extends SourceTask {
             ConsumerRecords<byte[], byte[]> records = consumer.poll(pollTimeout);
             List<SourceRecord> sourceRecords = new ArrayList<>(records.count());
             for (ConsumerRecord<byte[], byte[]> record : records) {
-                SourceRecord converted = convertRecord(record);
-                sourceRecords.add(converted);
-                TopicPartition topicPartition = new TopicPartition(converted.topic(), converted.kafkaPartition());
-                metrics.recordAge(topicPartition, System.currentTimeMillis() - record.timestamp());
-                metrics.recordBytes(topicPartition, byteSize(record.value()));
+                boolean needReplicator = true;
+
+                String value;
+
+                Header header = record.headers().lastHeader(REPLICATOR_ID_KEY);
+                if (header != null) {
+                    String replicatorId = new String(header.value());
+                    String[] ids = replicatorId.split(REPLICATOR_ID_SPLIT_KEY);
+                    for (String id : ids) {
+                        if (targetClusterAlias.equals(id)) {
+                            needReplicator = false;
+                            break;
+                        }
+                    }
+                    value = replicatorId + REPLICATOR_ID_SPLIT_KEY + sourceClusterAlias;
+
+                } else {
+                    value = sourceClusterAlias;
+                }
+
+                if (needReplicator) {
+                    record.headers().add(REPLICATOR_ID_KEY, value.getBytes(StandardCharsets.UTF_8));
+
+                    SourceRecord converted = convertRecord(record);
+                    sourceRecords.add(converted);
+                    TopicPartition topicPartition = new TopicPartition(converted.topic(), converted.kafkaPartition());
+                    metrics.recordAge(topicPartition, System.currentTimeMillis() - record.timestamp());
+                    metrics.recordBytes(topicPartition, byteSize(record.value()));
+                }
+
             }
             if (sourceRecords.isEmpty()) {
                 // WorkerSourceTasks expects non-zero batch size
@@ -265,13 +295,33 @@ public class MirrorSourceTask extends SourceTask {
     }
 
     private Map<TopicPartition, Long> loadOffsets(Set<TopicPartition> topicPartitions) {
-        return topicPartitions.stream().collect(Collectors.toMap(x -> x, this::loadOffset));
+        return topicPartitions.stream().collect(Collectors.toMap(x -> x, this::loadOffsetFromZk));
     }
 
     private Long loadOffset(TopicPartition topicPartition) {
         Map<String, Object> wrappedPartition = MirrorUtils.wrapPartition(topicPartition, sourceClusterAlias);
         Map<String, Object> wrappedOffset = context.offsetStorageReader().offset(wrappedPartition);
         return MirrorUtils.unwrapOffset(wrappedOffset) + 1;
+    }
+
+    // 启动的时候从zk获取offset
+    private Long loadOffsetFromZk(TopicPartition topicPartition) {
+        Long rs = -1L;
+        String path = getConsumerZkPath(topicPartition);
+        try {
+            byte[] data = sourceZkClient.getData().forPath(path);
+            if (data != null) {
+                rs = Long.valueOf(String.valueOf(data));
+            }
+        } catch (Exception e) {
+            log.error("启动时获取offset报错，ZK路径{}", path, e);
+        }
+
+        return rs;
+    }
+
+    private String getConsumerZkPath(TopicPartition tp) {
+        return String.format(CONSUMER_ZK_PATH_FORMAT, syncConsumerGroupId, tp.topic(), tp.partition());
     }
 
     // visible for testing
