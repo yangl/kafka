@@ -18,7 +18,6 @@ package org.apache.kafka.connect.mirror;
 
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.CONSUMER_ZK_PATH_FORMAT;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_CONSUMER_GROUP_ID_KEY;
-import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_SOURCE_ZK_KEY;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.REPLICATOR_ID_KEY;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.REPLICATOR_ID_SPLIT_KEY;
 
@@ -45,12 +44,14 @@ import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.header.ConnectHeaders;
 import org.apache.kafka.connect.header.Headers;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
+import org.apache.zookeeper.data.Stat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,7 +80,7 @@ public class MirrorSourceTask extends SourceTask {
     private Set<TopicPartition> taskTopicPartitions;
 
     // 上游集群zk连接串
-    private String sourceClusterZkConnectString;
+    private String sourceClusterZkConnect;
     // 上游集群消费组zk客户端
     private CuratorFramework sourceZkClient;
 
@@ -102,6 +103,12 @@ public class MirrorSourceTask extends SourceTask {
 
     @Override
     public void start(Map<String, String> props) {
+
+        // 消费组
+        syncConsumerGroupId = System.getProperty(MM2_CONSUMER_GROUP_ID_KEY);
+        String targetClusterZkConnect = props.get("target.cluster.zookeeper.connect");
+        checkBidirectionSync(targetClusterZkConnect, syncConsumerGroupId);
+
         MirrorTaskConfig config = new MirrorTaskConfig(props);
         outstandingOffsetSyncs = new Semaphore(MAX_OUTSTANDING_OFFSET_SYNCS);
         consumerAccess = new Semaphore(1);  // let one thread at a time access the consumer
@@ -125,13 +132,10 @@ public class MirrorSourceTask extends SourceTask {
         log.info("{} replicating {} topic-partitions {}->{}: {}.", Thread.currentThread().getName(),
             taskTopicPartitions.size(), sourceClusterAlias, config.targetClusterAlias(), taskTopicPartitions);
 
-        // 消费组
-        syncConsumerGroupId = System
-                .getProperty(MM2_CONSUMER_GROUP_ID_KEY, System.getenv(MM2_CONSUMER_GROUP_ID_KEY));
         // 上游zk初始化
-        sourceClusterZkConnectString = System.getProperty(MM2_SOURCE_ZK_KEY, System.getenv(MM2_SOURCE_ZK_KEY));
+        sourceClusterZkConnect = props.get("source.cluster.zookeeper.connect");
         RetryPolicy retryPolicy = new BoundedExponentialBackoffRetry(100, 10000, 10);
-        sourceZkClient = CuratorFrameworkFactory.newClient(sourceClusterZkConnectString, retryPolicy);
+        sourceZkClient = CuratorFrameworkFactory.newClient(sourceClusterZkConnect, retryPolicy);
         sourceZkClient.start();
 
     }
@@ -147,7 +151,7 @@ public class MirrorSourceTask extends SourceTask {
                 try {
                     sourceZkClient.create().orSetData().creatingParentContainersIfNeeded().forPath(path, data);
                 } catch (Exception e) {
-                    log.info("设置消费组offset报错，消费组{}，主题分区{}-{}，位点offset{}", syncConsumerGroupId, topicPartition.topic(),
+                    log.info("设置消费组offset报错，消费组{}，主题分区{}-{}，位点offset {}", syncConsumerGroupId, topicPartition.topic(),
                             topicPartition.partition(), upstreamOffset, e);
                 }
             }
@@ -306,7 +310,7 @@ public class MirrorSourceTask extends SourceTask {
 
     // 启动的时候从zk获取offset
     private Long loadOffsetFromZk(TopicPartition topicPartition) {
-        Long rs = -1L;
+        Long rs = 0L;
         String path = getConsumerZkPath(topicPartition);
         try {
             byte[] data = sourceZkClient.getData().forPath(path);
@@ -322,6 +326,35 @@ public class MirrorSourceTask extends SourceTask {
 
     private String getConsumerZkPath(TopicPartition tp) {
         return String.format(CONSUMER_ZK_PATH_FORMAT, syncConsumerGroupId, tp.topic(), tp.partition());
+    }
+
+    private void checkBidirectionSync(String targetClusterZkConnect, String syncConsumerGroupId) {
+        log.info("SF Kafka MirrorMaker2 循环同步探测中 ...");
+        RetryPolicy retryPolicy = new BoundedExponentialBackoffRetry(100, 10000, 10);
+        CuratorFramework targetZkClient = CuratorFrameworkFactory.newClient(targetClusterZkConnect, retryPolicy);
+        targetZkClient.start();
+
+        String path = "/consumers/" + syncConsumerGroupId + "/ids";
+        try {
+            Stat stat = targetZkClient.checkExists().forPath(path);
+            if (stat != null) {
+                List<String> consumerIds = targetZkClient.getChildren()
+                        .forPath(path);
+                targetZkClient.close();
+                if (consumerIds != null && consumerIds.size() > 0) {
+
+                    String msg = String.format("循环同步了！请确认下游集群[%s]同步消费组[%s]是否还在运行中？", targetClusterZkConnect,
+                            syncConsumerGroupId);
+                    System.err.println(msg);
+                    Exit.exit(4);
+                }
+            }
+        } catch (Exception e) {
+            log.error("循环同步探测报错", e);
+            Exit.exit(5);
+        }
+
+        log.info("SF Kafka MirrorMaker2 循环同步检测通过 ...");
     }
 
     // visible for testing

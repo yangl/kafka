@@ -16,9 +16,8 @@
  */
 package org.apache.kafka.connect.mirror;
 
-
+import static org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_CONSUMER_GROUP_ID_KEY;
-import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_TARGET_ZK_KEY;
 
 import java.io.File;
 import java.util.Arrays;
@@ -37,10 +36,6 @@ import net.sourceforge.argparse4j.impl.Arguments;
 import net.sourceforge.argparse4j.inf.ArgumentParser;
 import net.sourceforge.argparse4j.inf.ArgumentParserException;
 import net.sourceforge.argparse4j.inf.Namespace;
-import org.apache.curator.RetryPolicy;
-import org.apache.curator.framework.CuratorFramework;
-import org.apache.curator.framework.CuratorFrameworkFactory;
-import org.apache.curator.retry.BoundedExponentialBackoffRetry;
 import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
@@ -298,33 +293,14 @@ public class MirrorMaker {
         File configFile = ns.get("config");
         List<String> clusters = ns.getList("clusters");
         try {
-
-            log.info("SF Kafka MirrorMaker2 循环同步探测中 ...");
-            RetryPolicy retryPolicy = new BoundedExponentialBackoffRetry(100, 10000, 10);
-
-            String syncConsumerGroupId = System
-                    .getProperty(MM2_CONSUMER_GROUP_ID_KEY, System.getenv(MM2_CONSUMER_GROUP_ID_KEY));
-            String targetClusterZkConnectString = System
-                    .getProperty(MM2_TARGET_ZK_KEY, System.getenv(MM2_TARGET_ZK_KEY));
-            CuratorFramework targetZkClient = CuratorFrameworkFactory
-                    .newClient(targetClusterZkConnectString, retryPolicy);
-            targetZkClient.start();
-            List<String> consumerIds = targetZkClient.getChildren()
-                    .forPath("/consumers/" + syncConsumerGroupId + "/ids");
-            targetZkClient.close();
-            if (consumerIds != null && consumerIds.size() > 0) {
-
-                String msg = String.format("循环同步了！请确认下游集群[%s]同步消费组[%s]是否还在运行中？", targetClusterZkConnectString,
-                        syncConsumerGroupId);
-                System.err.println(msg);
-                Exit.exit(4);
-            }
-            log.info("SF Kafka MirrorMaker2 循环同步检测通过 ...");
-
             log.info("Kafka MirrorMaker initializing ...");
 
             Properties props = Utils.loadProps(configFile.getPath());
             Map<String, String> config = Utils.propsToStringMap(props);
+
+            // 设置消费组
+            System.setProperty(MM2_CONSUMER_GROUP_ID_KEY, config.get(GROUP_ID_CONFIG));
+
             MirrorMaker mirrorMaker = new MirrorMaker(config, clusters, Time.SYSTEM);
 
             try {

@@ -16,8 +16,6 @@
  */
 package org.apache.kafka.connect.mirror;
 
-import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_CONSUMER_GROUP_ID_KEY;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -178,15 +176,14 @@ public class MirrorMakerConfig extends AbstractConfig {
         props.putAll(stringsWithPrefix("task"));
         props.putAll(stringsWithPrefix("worker"));
         props.putAll(stringsWithPrefix("replication.policy"));
+        props.putAll(stringsWithPrefix("group.id"));
 
         // transform any expression like ${provider:path:key}, since the worker doesn't do so
         props = transform(props);
         props.putAll(stringsWithPrefix(CONFIG_PROVIDERS_CONFIG));
 
         // fill in reasonable defaults
-        // props.putIfAbsent(GROUP_ID_CONFIG, sourceAndTarget.source() + "-mm2");
-        props.putIfAbsent(GROUP_ID_CONFIG,
-                System.getProperty(MM2_CONSUMER_GROUP_ID_KEY, System.getenv(MM2_CONSUMER_GROUP_ID_KEY)));
+        props.putIfAbsent(GROUP_ID_CONFIG, sourceAndTarget.source() + "-mm2");
         props.putIfAbsent(DistributedConfig.OFFSET_STORAGE_TOPIC_CONFIG, "mm2-offsets."
                 + sourceAndTarget.source() + ".internal");
         props.putIfAbsent(DistributedConfig.STATUS_STORAGE_TOPIC_CONFIG, "mm2-status."
