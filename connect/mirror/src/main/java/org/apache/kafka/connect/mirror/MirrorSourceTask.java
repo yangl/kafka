@@ -88,7 +88,7 @@ public class MirrorSourceTask extends SourceTask {
     private CuratorFramework sourceZkClient;
 
     // 同步消费组名称
-    private String syncConsumerGroupId;
+    private String sfMm2ConsumerGroupId;
 
     private static Method getClientIdMethod;
 
@@ -118,10 +118,10 @@ public class MirrorSourceTask extends SourceTask {
 
     @Override
     public void start(Map<String, String> props) {
-        syncConsumerGroupId = System.getProperty(MM2_CONSUMER_GROUP_ID_KEY);
+        sfMm2ConsumerGroupId = System.getProperty(MM2_CONSUMER_GROUP_ID_KEY);
         String targetClusterZkConnect = props.get("target.cluster.zookeeper.connect");
         // 循环同步检测
-        checkBidirectionSync(targetClusterZkConnect, syncConsumerGroupId);
+        checkBidirectionSync(targetClusterZkConnect, sfMm2ConsumerGroupId);
 
         // 上游zk初始化
         sourceClusterZkConnect = props.get("source.cluster.zookeeper.connect");
@@ -155,10 +155,14 @@ public class MirrorSourceTask extends SourceTask {
 
         // 注册当前task至消费组ids下
         try {
+            String idsPath = "/consumers/" + sfMm2ConsumerGroupId + "/ids";
+            if (sourceZkClient.checkExists().forPath(idsPath) == null) {
+                sourceZkClient.create().creatingParentContainersIfNeeded().forPath(idsPath);
+            }
             String ip = InetAddress.getLocalHost().getHostAddress();
             String clientId = (String) getClientIdMethod.invoke(consumer);
-            sourceZkClient.create().orSetData().creatingParentContainersIfNeeded().withMode(CreateMode.EPHEMERAL)
-                    .forPath("/consumers/" + syncConsumerGroupId + "/ids/" + ip + "_" + clientId);
+            sourceZkClient.create().orSetData().withMode(CreateMode.EPHEMERAL)
+                    .forPath(idsPath + "/" + ip + "@_@" + clientId);
         } catch (Exception e) {
             log.error("注册当前消费组id报错", e);
             stop();
@@ -177,10 +181,10 @@ public class MirrorSourceTask extends SourceTask {
                 String path = getConsumerZkPath(topicPartition);
                 try {
                     sourceZkClient.create().orSetData().creatingParentContainersIfNeeded().forPath(path, data);
-                    log.debug("设置消费组offset报错，消费组{}，主题分区{}-{}，位点offset {}", syncConsumerGroupId, topicPartition.topic(),
+                    log.debug("设置消费组offset报错，消费组{}，主题分区{}-{}，位点offset {}", sfMm2ConsumerGroupId, topicPartition.topic(),
                             topicPartition.partition(), upstreamOffset);
                 } catch (Exception e) {
-                    log.error("设置消费组offset报错，消费组{}，主题分区{}-{}，位点offset {}", syncConsumerGroupId, topicPartition.topic(),
+                    log.error("设置消费组offset报错，消费组{}，主题分区{}-{}，位点offset {}", sfMm2ConsumerGroupId, topicPartition.topic(),
                             topicPartition.partition(), upstreamOffset, e);
                 }
             }
@@ -359,16 +363,16 @@ public class MirrorSourceTask extends SourceTask {
     }
 
     private String getConsumerZkPath(TopicPartition tp) {
-        return String.format(CONSUMER_ZK_PATH_FORMAT, syncConsumerGroupId, tp.topic(), tp.partition());
+        return String.format(CONSUMER_ZK_PATH_FORMAT, sfMm2ConsumerGroupId, tp.topic(), tp.partition());
     }
 
-    private void checkBidirectionSync(String targetClusterZkConnect, String syncConsumerGroupId) {
+    private void checkBidirectionSync(String targetClusterZkConnect, String groupId) {
         log.info("SF Kafka MirrorMaker2 循环同步探测中 ...");
         RetryPolicy retryPolicy = new BoundedExponentialBackoffRetry(100, 10000, 10);
         CuratorFramework targetZkClient = CuratorFrameworkFactory.newClient(targetClusterZkConnect, retryPolicy);
         targetZkClient.start();
 
-        String path = "/consumers/" + syncConsumerGroupId + "/ids";
+        String path = "/consumers/" + groupId + "/ids";
         try {
             Stat stat = targetZkClient.checkExists().forPath(path);
             if (stat != null) {
@@ -378,7 +382,7 @@ public class MirrorSourceTask extends SourceTask {
                 if (consumerIds != null && consumerIds.size() > 0) {
 
                     String msg = String.format("循环同步了！请确认下游集群[%s]同步消费组[%s]是否还在运行中？", targetClusterZkConnect,
-                            syncConsumerGroupId);
+                            groupId);
                     System.err.println(msg);
                     Exit.exit(4);
                 }
