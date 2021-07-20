@@ -18,6 +18,7 @@ package org.apache.kafka.connect.mirror;
 
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.CONSUMER_ZK_PATH_FORMAT;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_CONSUMER_GROUP_ID_KEY;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.PROVENANCE_HEADER_ENABLE_KEY;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.REPLICATOR_ID_KEY;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.REPLICATOR_ID_SPLIT_KEY;
 
@@ -89,6 +90,8 @@ public class MirrorSourceTask extends SourceTask {
 
     // 同步消费组名称
     private String sfMm2ConsumerGroupId;
+    // 循环同步消息头检测开关
+    private boolean provenanceHeaderEnable = false;
 
     private static Method getClientIdMethod;
 
@@ -119,6 +122,8 @@ public class MirrorSourceTask extends SourceTask {
     @Override
     public void start(Map<String, String> props) {
         sfMm2ConsumerGroupId = System.getProperty(MM2_CONSUMER_GROUP_ID_KEY);
+        provenanceHeaderEnable = Boolean
+                .valueOf(System.getProperty(PROVENANCE_HEADER_ENABLE_KEY, Boolean.FALSE.toString()));
         String targetClusterZkConnect = props.get("target.cluster.zookeeper.connect");
         // 循环同步检测
         checkBidirectionSync(targetClusterZkConnect, sfMm2ConsumerGroupId);
@@ -144,7 +149,7 @@ public class MirrorSourceTask extends SourceTask {
         offsetProducer = MirrorUtils.newProducer(config.offsetSyncsTopicProducerConfig());
         taskTopicPartitions = config.taskTopicPartitions();
         Map<TopicPartition, Long> topicPartitionOffsets = loadOffsetsFromZk(taskTopicPartitions);
-        Map<TopicPartition, Long> topicPartitionOffsets2 = loadOffsets(taskTopicPartitions);
+        // Map<TopicPartition, Long> topicPartitionOffsets2 = loadOffsets(taskTopicPartitions);
         consumer.assign(topicPartitionOffsets.keySet());
         log.info("Starting with {} previously uncommitted partitions.", topicPartitionOffsets.entrySet().stream()
             .filter(x -> x.getValue() == 0L).count());
@@ -228,27 +233,32 @@ public class MirrorSourceTask extends SourceTask {
             for (ConsumerRecord<byte[], byte[]> record : records) {
                 boolean needReplicator = true;
 
-                String value;
+                String sfReplicatorValue = sourceClusterAlias;
 
-                Header header = record.headers().lastHeader(REPLICATOR_ID_KEY);
-                if (header != null) {
-                    String replicatorId = new String(header.value());
-                    String[] ids = replicatorId.split(REPLICATOR_ID_SPLIT_KEY);
-                    for (String id : ids) {
-                        if (targetClusterAlias.equals(id)) {
-                            needReplicator = false;
-                            break;
+                if (provenanceHeaderEnable) {
+                    Header header = record.headers().lastHeader(REPLICATOR_ID_KEY);
+                    if (header != null) {
+                        String replicatorId = new String(header.value());
+                        String[] ids = replicatorId.split(REPLICATOR_ID_SPLIT_KEY);
+                        for (String id : ids) {
+                            if (targetClusterAlias.equals(id)) {
+                                needReplicator = false;
+                                break;
+                            }
+                        }
+                        if (needReplicator) {
+                            sfReplicatorValue = replicatorId + REPLICATOR_ID_SPLIT_KEY + sourceClusterAlias;
+                        } else {
+                            sfReplicatorValue = replicatorId;
                         }
                     }
-                    value = replicatorId + REPLICATOR_ID_SPLIT_KEY + sourceClusterAlias;
-
-                } else {
-                    value = sourceClusterAlias;
                 }
 
-                if (needReplicator) {
-                    record.headers().add(REPLICATOR_ID_KEY, value.getBytes(StandardCharsets.UTF_8));
 
+                if (needReplicator) {
+                    if (provenanceHeaderEnable) {
+                        record.headers().add(REPLICATOR_ID_KEY, sfReplicatorValue.getBytes(StandardCharsets.UTF_8));
+                    }
                     SourceRecord converted = convertRecord(record);
                     sourceRecords.add(converted);
                     TopicPartition topicPartition = new TopicPartition(converted.topic(), converted.kafkaPartition());

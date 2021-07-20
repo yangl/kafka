@@ -18,6 +18,7 @@ package org.apache.kafka.connect.mirror;
 
 import static org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_CONSUMER_GROUP_ID_KEY;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.PROVENANCE_HEADER_ENABLE_KEY;
 
 import java.io.File;
 import java.util.Arrays;
@@ -300,6 +301,9 @@ public class MirrorMaker {
 
             // 设置消费组
             System.setProperty(MM2_CONSUMER_GROUP_ID_KEY, config.get(GROUP_ID_CONFIG));
+            // 设置循环同步消息头检测
+            System.setProperty(PROVENANCE_HEADER_ENABLE_KEY,
+                    config.getOrDefault(PROVENANCE_HEADER_ENABLE_KEY, Boolean.FALSE.toString()));
 
             MirrorMaker mirrorMaker = new MirrorMaker(config, clusters, Time.SYSTEM);
 
