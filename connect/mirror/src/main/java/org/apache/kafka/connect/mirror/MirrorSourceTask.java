@@ -55,6 +55,7 @@ import org.apache.kafka.connect.header.Headers;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
 import org.apache.zookeeper.CreateMode;
+import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.data.Stat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -161,19 +162,18 @@ public class MirrorSourceTask extends SourceTask {
         // 注册当前task至消费组ids下
         try {
             String idsPath = "/consumers/" + sfMm2ConsumerGroupId + "/ids";
-            if (sourceZkClient.checkExists().forPath(idsPath) == null) {
-                sourceZkClient.create().creatingParentContainersIfNeeded().forPath(idsPath);
-            }
+            sourceZkClient.create().orSetData().creatingParentsIfNeeded().forPath(idsPath);
             String ip = InetAddress.getLocalHost().getHostAddress();
             String clientId = (String) getClientIdMethod.invoke(consumer);
             sourceZkClient.create().orSetData().withMode(CreateMode.EPHEMERAL)
                     .forPath(idsPath + "/" + ip + "@_@" + clientId);
+        } catch (KeeperException.NodeExistsException e) {
+            // ignore
         } catch (Exception e) {
             log.error("注册当前消费组id报错", e);
             stop();
             Exit.exit(6);
         }
-
     }
 
     @Override
@@ -185,7 +185,7 @@ public class MirrorSourceTask extends SourceTask {
                 byte[] data = String.valueOf(upstreamOffset).getBytes(StandardCharsets.UTF_8);
                 String path = getConsumerZkPath(topicPartition);
                 try {
-                    sourceZkClient.create().orSetData().creatingParentContainersIfNeeded().forPath(path, data);
+                    sourceZkClient.create().orSetData().creatingParentsIfNeeded().forPath(path, data);
                     log.debug("设置消费组offset报错，消费组{}，主题分区{}-{}，位点offset {}", sfMm2ConsumerGroupId, topicPartition.topic(),
                             topicPartition.partition(), upstreamOffset);
                 } catch (Exception e) {
@@ -366,7 +366,7 @@ public class MirrorSourceTask extends SourceTask {
                 rs = Long.parseLong(new String(data));
             }
         } catch (Exception e) {
-            log.error("启动时获取offset报错，ZK路径{}", path, e);
+            log.warn("启动时获取offset报错，ZK路径{}", path, e);
         }
 
         return rs + 1;
