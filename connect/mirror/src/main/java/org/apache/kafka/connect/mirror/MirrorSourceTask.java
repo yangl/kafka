@@ -16,11 +16,14 @@
  */
 package org.apache.kafka.connect.mirror;
 
-import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.CONSUMER_ZK_PATH_FORMAT;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_CONSUMER_GROUP_ID_KEY;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.PROVENANCE_HEADER_ENABLE_KEY;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.REPLICATOR_ID_KEY;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.REPLICATOR_ID_SPLIT_KEY;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.SOURCE_CLUSTER_ZOOKEEPER_CONNECT;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.TARGET_CLUSTER_ZOOKEEPER_CONNECT;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.getConsumerGroupIdsPath;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.getConsumerPath;
 
 import java.lang.reflect.Method;
 import java.net.InetAddress;
@@ -125,12 +128,12 @@ public class MirrorSourceTask extends SourceTask {
         sfMm2ConsumerGroupId = System.getProperty(MM2_CONSUMER_GROUP_ID_KEY);
         provenanceHeaderEnable = Boolean
                 .valueOf(System.getProperty(PROVENANCE_HEADER_ENABLE_KEY, Boolean.FALSE.toString()));
-        String targetClusterZkConnect = props.get("target.cluster.zookeeper.connect");
+        String targetClusterZkConnect = props.get(TARGET_CLUSTER_ZOOKEEPER_CONNECT);
         // 循环同步检测
         checkBidirectionSync(targetClusterZkConnect, sfMm2ConsumerGroupId);
 
         // 上游zk初始化
-        sourceClusterZkConnect = props.get("source.cluster.zookeeper.connect");
+        sourceClusterZkConnect = props.get(SOURCE_CLUSTER_ZOOKEEPER_CONNECT);
         RetryPolicy retryPolicy = new BoundedExponentialBackoffRetry(100, 10000, 10);
         sourceZkClient = CuratorFrameworkFactory.newClient(sourceClusterZkConnect, retryPolicy);
         sourceZkClient.start();
@@ -161,11 +164,10 @@ public class MirrorSourceTask extends SourceTask {
 
         // 注册当前task至消费组ids下
         try {
-            String idsPath = "/consumers/" + sfMm2ConsumerGroupId + "/ids";
-            sourceZkClient.create().orSetData().creatingParentsIfNeeded().forPath(idsPath);
+            String idsPath = getConsumerGroupIdsPath(sfMm2ConsumerGroupId);
             String ip = InetAddress.getLocalHost().getHostAddress();
             String clientId = (String) getClientIdMethod.invoke(consumer);
-            sourceZkClient.create().orSetData().withMode(CreateMode.EPHEMERAL)
+            sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
                     .forPath(idsPath + "/" + ip + "@_@" + clientId);
         } catch (KeeperException.NodeExistsException e) {
             // ignore
@@ -183,7 +185,7 @@ public class MirrorSourceTask extends SourceTask {
             Long upstreamOffset = loadOffset(topicPartition) - 1;
             if (upstreamOffset != null && upstreamOffset.longValue() >= 0) {
                 byte[] data = String.valueOf(upstreamOffset).getBytes(StandardCharsets.UTF_8);
-                String path = getConsumerZkPath(topicPartition);
+                String path = getConsumerPath(topicPartition, sfMm2ConsumerGroupId);
                 try {
                     sourceZkClient.create().orSetData().creatingParentsIfNeeded().forPath(path, data);
                     log.debug("设置消费组offset报错，消费组{}，主题分区{}-{}，位点offset {}", sfMm2ConsumerGroupId, topicPartition.topic(),
@@ -359,7 +361,7 @@ public class MirrorSourceTask extends SourceTask {
     // 启动的时候从zk获取offset
     private Long loadOffsetFromZk(TopicPartition topicPartition) {
         Long rs = -1L;
-        String path = getConsumerZkPath(topicPartition);
+        String path = getConsumerPath(topicPartition, sfMm2ConsumerGroupId);
         try {
             byte[] data = sourceZkClient.getData().forPath(path);
             if (data != null) {
@@ -370,10 +372,6 @@ public class MirrorSourceTask extends SourceTask {
         }
 
         return rs + 1;
-    }
-
-    private String getConsumerZkPath(TopicPartition tp) {
-        return String.format(CONSUMER_ZK_PATH_FORMAT, sfMm2ConsumerGroupId, tp.topic(), tp.partition());
     }
 
     private void checkBidirectionSync(String targetClusterZkConnect, String groupId) {
