@@ -19,7 +19,6 @@ package org.apache.kafka.connect.mirror;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_CONSUMER_GROUP_ID_KEY;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.PROVENANCE_HEADER_ENABLE_KEY;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.REPLICATOR_ID_KEY;
-import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.REPLICATOR_ID_SPLIT_KEY;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.SOURCE_CLUSTER_ZOOKEEPER_CONNECT;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.TARGET_CLUSTER_ZOOKEEPER_CONNECT;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.getConsumerGroupIdsPath;
@@ -235,32 +234,25 @@ public class MirrorSourceTask extends SourceTask {
             for (ConsumerRecord<byte[], byte[]> record : records) {
                 boolean needReplicator = true;
 
-                String sfReplicatorValue = sourceClusterAlias;
-
                 if (provenanceHeaderEnable) {
+                    Iterable<Header> headers = record.headers().headers(REPLICATOR_ID_KEY);
+                    for (Header header : headers) {
+                        if (targetClusterAlias.equals(new String(header.value()))) {
+                            needReplicator = false;
+                            break;
+                        }
+                    }
                     Header header = record.headers().lastHeader(REPLICATOR_ID_KEY);
                     if (header != null) {
-                        String replicatorId = new String(header.value());
-                        String[] ids = replicatorId.split(REPLICATOR_ID_SPLIT_KEY);
-                        for (String id : ids) {
-                            if (targetClusterAlias.equals(id)) {
-                                needReplicator = false;
-                                break;
-                            }
-                        }
-                        if (needReplicator) {
-                            sfReplicatorValue = replicatorId + REPLICATOR_ID_SPLIT_KEY + sourceClusterAlias;
-                        } else {
-                            sfReplicatorValue = replicatorId;
+                        String value = new String(header.value());
+                        if (!sourceClusterAlias.equals(value)) {
+                            record.headers()
+                                    .add(REPLICATOR_ID_KEY, sourceClusterAlias.getBytes(StandardCharsets.UTF_8));
                         }
                     }
                 }
 
-
                 if (needReplicator) {
-                    if (provenanceHeaderEnable) {
-                        record.headers().add(REPLICATOR_ID_KEY, sfReplicatorValue.getBytes(StandardCharsets.UTF_8));
-                    }
                     SourceRecord converted = convertRecord(record);
                     sourceRecords.add(converted);
                     TopicPartition topicPartition = new TopicPartition(converted.topic(), converted.kafkaPartition());
