@@ -232,8 +232,8 @@ public class MirrorSourceTask extends SourceTask {
             ConsumerRecords<byte[], byte[]> records = consumer.poll(pollTimeout);
             List<SourceRecord> sourceRecords = new ArrayList<>(records.count());
             for (ConsumerRecord<byte[], byte[]> record : records) {
+                // 是否需要同步该消息至下游集群
                 boolean needReplicator = true;
-
                 if (provenanceHeaderEnable) {
                     Iterable<Header> headers = record.headers().headers(REPLICATOR_ID_KEY);
                     for (Header header : headers) {
@@ -242,10 +242,18 @@ public class MirrorSourceTask extends SourceTask {
                             break;
                         }
                     }
-                    Header header = record.headers().lastHeader(REPLICATOR_ID_KEY);
-                    if (header != null) {
-                        String value = new String(header.value());
-                        if (!sourceClusterAlias.equals(value)) {
+
+                    if (needReplicator) {
+                        // 是否要添加`__SF_REPLICATOR_ID` header
+                        boolean needAddReplicatorHeader = true;
+                        Header header = record.headers().lastHeader(REPLICATOR_ID_KEY);
+                        if (header != null) {
+                            String value = new String(header.value());
+                            if (sourceClusterAlias.equals(value)) {
+                                needAddReplicatorHeader = false;
+                            }
+                        }
+                        if (needAddReplicatorHeader) {
                             record.headers()
                                     .add(REPLICATOR_ID_KEY, sourceClusterAlias.getBytes(StandardCharsets.UTF_8));
                         }
