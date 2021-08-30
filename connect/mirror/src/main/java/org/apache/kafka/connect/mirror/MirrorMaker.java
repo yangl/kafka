@@ -281,7 +281,7 @@ public class MirrorMaker {
         parser.addArgument("config").type(Arguments.fileType().verifyCanRead())
             .metavar("mm2.properties").required(true)
             .help("MM2 configuration file.");
-        parser.addArgument("--clusters").nargs("+").metavar("CLUSTER").required(false)
+        parser.addArgument("--clusters").nargs("+").metavar("CLUSTER").required(true)
             .help("Target cluster to use for this node.");
         Namespace ns;
         try {
