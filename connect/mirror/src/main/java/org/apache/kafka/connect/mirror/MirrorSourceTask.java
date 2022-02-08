@@ -22,8 +22,10 @@ import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.REPLICATOR_
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.SOURCE_CLUSTER_ZOOKEEPER_CONNECT;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.TARGET_CLUSTER_ZOOKEEPER_CONNECT;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.getConsumerGroupIdsPath;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.getConsumerOwnersPath;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.getConsumerPath;
-
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.google.common.collect.Maps;
 import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
@@ -96,9 +98,11 @@ public class MirrorSourceTask extends SourceTask {
     // 循环同步消息头检测开关
     private boolean provenanceHeaderEnable = false;
 
-    private static Method getClientIdMethod;
+    private static final JsonMapper JSON_MAPPER = new JsonMapper();
 
     // 消费组clientId
+    private static Method getClientIdMethod;
+
     static {
         try {
             getClientIdMethod = KafkaConsumer.class.getDeclaredMethod("getClientId");
@@ -109,7 +113,8 @@ public class MirrorSourceTask extends SourceTask {
     }
 
 
-    public MirrorSourceTask() {}
+    public MirrorSourceTask() {
+    }
 
     // for testing
     MirrorSourceTask(KafkaConsumer<byte[], byte[]> consumer, MirrorMetrics metrics, String sourceClusterAlias,
@@ -155,26 +160,15 @@ public class MirrorSourceTask extends SourceTask {
         // Map<TopicPartition, Long> topicPartitionOffsets2 = loadOffsets(taskTopicPartitions);
         consumer.assign(topicPartitionOffsets.keySet());
         log.info("Starting with {} previously uncommitted partitions.", topicPartitionOffsets.entrySet().stream()
-            .filter(x -> x.getValue() == 0L).count());
+                .filter(x -> x.getValue() == 0L).count());
         log.trace("Seeking offsets: {}", topicPartitionOffsets);
         topicPartitionOffsets.forEach(consumer::seek);
         log.info("{} replicating {} topic-partitions {}->{}: {}.", Thread.currentThread().getName(),
-            taskTopicPartitions.size(), sourceClusterAlias, config.targetClusterAlias(), taskTopicPartitions);
+                taskTopicPartitions.size(), sourceClusterAlias, config.targetClusterAlias(), taskTopicPartitions);
 
-        // 注册当前task至消费组ids下
-        try {
-            String idsPath = getConsumerGroupIdsPath(sfMm2ConsumerGroupId);
-            String ip = InetAddress.getLocalHost().getHostAddress();
-            String clientId = (String) getClientIdMethod.invoke(consumer);
-            sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
-                    .forPath(idsPath + "/" + ip + "@_@" + clientId);
-        } catch (KeeperException.NodeExistsException e) {
-            // ignore
-        } catch (Exception e) {
-            log.error("注册当前消费组id报错", e);
-            stop();
-            Exit.exit(6);
-        }
+        // 注册当前task至消费组ids&owners下
+        registerConsumerInZK();
+
     }
 
     @Override
@@ -281,7 +275,7 @@ public class MirrorSourceTask extends SourceTask {
         } catch (KafkaException e) {
             log.warn("Failure during poll.", e);
             return null;
-        } catch (Throwable e)  {
+        } catch (Throwable e) {
             log.error("Failure during poll.", e);
             // allow Connect to deal with the exception
             throw e;
@@ -315,9 +309,9 @@ public class MirrorSourceTask extends SourceTask {
 
     // updates partition state and sends OffsetSync if necessary
     private void maybeSyncOffsets(TopicPartition topicPartition, long upstreamOffset,
-            long downstreamOffset) {
+                                  long downstreamOffset) {
         PartitionState partitionState =
-            partitionStates.computeIfAbsent(topicPartition, x -> new PartitionState(maxOffsetLag));
+                partitionStates.computeIfAbsent(topicPartition, x -> new PartitionState(maxOffsetLag));
         if (partitionState.update(upstreamOffset, downstreamOffset)) {
             sendOffsetSync(topicPartition, upstreamOffset, downstreamOffset);
         }
@@ -325,7 +319,7 @@ public class MirrorSourceTask extends SourceTask {
 
     // sends OffsetSync record upstream to internal offsets topic
     private void sendOffsetSync(TopicPartition topicPartition, long upstreamOffset,
-            long downstreamOffset) {
+                                long downstreamOffset) {
         if (!outstandingOffsetSyncs.tryAcquire()) {
             // Too many outstanding offset syncs.
             return;
@@ -338,7 +332,7 @@ public class MirrorSourceTask extends SourceTask {
                 log.error("Failure sending offset sync.", e);
             } else {
                 log.trace("Sync'd offsets for {}: {}=={}", topicPartition,
-                    upstreamOffset, downstreamOffset);
+                        upstreamOffset, downstreamOffset);
             }
             outstandingOffsetSyncs.release();
         });
@@ -356,6 +350,53 @@ public class MirrorSourceTask extends SourceTask {
         Map<String, Object> wrappedPartition = MirrorUtils.wrapPartition(topicPartition, sourceClusterAlias);
         Map<String, Object> wrappedOffset = context.offsetStorageReader().offset(wrappedPartition);
         return MirrorUtils.unwrapOffset(wrappedOffset) + 1;
+    }
+
+    // 注册当前task至消费组ids owners下
+    private void registerConsumerInZK() {
+
+        //{
+        //  "version": 1,
+        //  "subscription": {
+        //    "EOS_FOP_QMS_SX_EXCEPWAYBILLINFO": 1
+        //  },
+        //  "pattern": "static",
+        //  "timestamp": "1644262684333"
+        //}
+        Map<String, Integer> topicCount = Maps.newHashMap();
+        taskTopicPartitions.forEach(tp -> topicCount.putIfAbsent(tp.topic(), 1));
+
+        Map<String, Object> consumerData = Maps.newHashMap();
+        consumerData.put("version", 1);
+        consumerData.put("pattern", "static");
+        consumerData.put("timestamp", String.valueOf(System.currentTimeMillis()));
+        consumerData.put("subscription", topicCount);
+
+        try {
+            // ids
+            String idsPath = getConsumerGroupIdsPath(sfMm2ConsumerGroupId);
+            String clientId = InetAddress.getLocalHost().getHostAddress() + (String) getClientIdMethod.invoke(consumer);
+            sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
+                    .forPath(idsPath + "/" + clientId, JSON_MAPPER.writeValueAsBytes(consumerData));
+
+            // owners
+            taskTopicPartitions.forEach(tp -> {
+                String path = getConsumerOwnersPath(sfMm2ConsumerGroupId, tp);
+                try {
+                    sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
+                            .forPath(path, clientId.getBytes(StandardCharsets.UTF_8));
+                } catch (Exception e) {
+                    log.error("设置消费者owner报错", e);
+                }
+            });
+
+        } catch (KeeperException.NodeExistsException e) {
+            // ignore
+        } catch (Exception e) {
+            log.error("注册当前消费组id报错", e);
+            stop();
+            Exit.exit(6);
+        }
     }
 
     // 启动的时候从zk获取offset

@@ -2,7 +2,6 @@ package org.apache.kafka.connect.mirror;
 
 import static org.apache.kafka.connect.mirror.MirrorMakerConfig.SOURCE_CLUSTER_PREFIX;
 import static org.apache.kafka.connect.mirror.MirrorMakerConfig.TARGET_CLUSTER_PREFIX;
-
 import org.apache.kafka.common.TopicPartition;
 
 /**
@@ -16,6 +15,7 @@ public class SFMirrorMakerConstants {
 
     public static final String CONSUMER_PATH_FORMAT = "/consumers/%s/offsets/%s/%d";
     public static final String CONSUMER_IDS_PATH_FORMAT = "/consumers/%s/ids";
+    public static final String CONSUMER_OWNERS_PATH_FORMAT = "/consumers/%s/owners/%s/%d";
 
     public static final String REPLICATOR_ID_KEY = "__SF_REPLICATOR_ID";
 
@@ -33,4 +33,8 @@ public class SFMirrorMakerConstants {
         return String.format(CONSUMER_IDS_PATH_FORMAT, groupId);
     }
 
+    // 获取消费组ids路径
+    public static final String getConsumerOwnersPath(String groupId, TopicPartition tp) {
+        return String.format(CONSUMER_OWNERS_PATH_FORMAT, groupId, tp.topic(), tp.partition());
+    }
 }
