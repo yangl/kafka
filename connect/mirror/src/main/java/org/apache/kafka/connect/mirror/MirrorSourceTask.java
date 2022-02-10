@@ -173,6 +173,9 @@ public class MirrorSourceTask extends SourceTask {
 
     @Override
     public void commit() {
+        if (taskTopicPartitions == null) {
+            return;
+        }
         // 保存消费组offset至zk，兼容现有zk消费组offset同步机制
         taskTopicPartitions.forEach(topicPartition -> {
             Long upstreamOffset = loadOffset(topicPartition) - 1;
@@ -383,9 +386,8 @@ public class MirrorSourceTask extends SourceTask {
             taskTopicPartitions.forEach(tp -> {
                 String path = getConsumerOwnersPath(sfMm2ConsumerGroupId, tp);
                 try {
-                    String owner = clientId + "-0";
                     sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
-                            .forPath(path, owner.getBytes(StandardCharsets.UTF_8));
+                            .forPath(path, clientId.getBytes(StandardCharsets.UTF_8));
                 } catch (Exception e) {
                     log.error("设置消费者owner报错", e);
                 }
