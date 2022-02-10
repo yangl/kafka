@@ -29,6 +29,8 @@ import org.apache.kafka.common.utils.ConfigUtils;
 import org.apache.kafka.connect.runtime.ConnectorConfig;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_CONSUMER_GROUP_ID_KEY;
 
 import java.util.Map;
 import java.util.HashMap;
@@ -260,6 +262,7 @@ public class MirrorConnectorConfig extends AbstractConfig {
         props.putAll(originalsWithPrefix(SOURCE_PREFIX + CONSUMER_CLIENT_PREFIX));
         props.put(ENABLE_AUTO_COMMIT_CONFIG, "false");
         props.putIfAbsent(AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.putIfAbsent(GROUP_ID_CONFIG, System.getProperty(MM2_CONSUMER_GROUP_ID_KEY));
         return props;
     }
 
@@ -492,7 +495,7 @@ public class MirrorConnectorConfig extends AbstractConfig {
                     ConfigDef.Type.LIST,
                     TOPICS_DEFAULT,
                     ConfigDef.Importance.HIGH,
-                    TOPICS_DOC) 
+                    TOPICS_DOC)
             .define(
                     TOPICS_EXCLUDE,
                     ConfigDef.Type.LIST,
@@ -510,7 +513,7 @@ public class MirrorConnectorConfig extends AbstractConfig {
                     ConfigDef.Type.LIST,
                     GROUPS_DEFAULT,
                     ConfigDef.Importance.HIGH,
-                    GROUPS_DOC) 
+                    GROUPS_DOC)
             .define(
                     GROUPS_EXCLUDE,
                     ConfigDef.Type.LIST,

@@ -375,7 +375,7 @@ public class MirrorSourceTask extends SourceTask {
         try {
             // ids
             String idsPath = getConsumerGroupIdsPath(sfMm2ConsumerGroupId);
-            String clientId = InetAddress.getLocalHost().getHostAddress() + (String) getClientIdMethod.invoke(consumer);
+            String clientId = InetAddress.getLocalHost().getHostAddress() + "-" + getClientIdMethod.invoke(consumer);
             sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
                     .forPath(idsPath + "/" + clientId, JSON_MAPPER.writeValueAsBytes(consumerData));
 
@@ -383,8 +383,9 @@ public class MirrorSourceTask extends SourceTask {
             taskTopicPartitions.forEach(tp -> {
                 String path = getConsumerOwnersPath(sfMm2ConsumerGroupId, tp);
                 try {
+                    String owner = clientId + "-0";
                     sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
-                            .forPath(path, clientId.getBytes(StandardCharsets.UTF_8));
+                            .forPath(path, owner.getBytes(StandardCharsets.UTF_8));
                 } catch (Exception e) {
                     log.error("设置消费者owner报错", e);
                 }
