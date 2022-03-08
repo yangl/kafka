@@ -178,8 +178,8 @@ public class MirrorSourceTask extends SourceTask {
         }
         // 保存消费组offset至zk，兼容现有zk消费组offset同步机制
         taskTopicPartitions.forEach(topicPartition -> {
-            Long upstreamOffset = loadOffset(topicPartition) - 1;
-            if (upstreamOffset != null && upstreamOffset.longValue() >= 0) {
+            Long upstreamOffset = loadOffset(topicPartition);
+            if (upstreamOffset != null) {
                 byte[] data = String.valueOf(upstreamOffset).getBytes(StandardCharsets.UTF_8);
                 String path = getConsumerPath(topicPartition, sfMm2ConsumerGroupId);
                 try {
@@ -404,18 +404,25 @@ public class MirrorSourceTask extends SourceTask {
 
     // 启动的时候从zk获取offset
     private Long loadOffsetFromZk(TopicPartition topicPartition) {
-        Long rs = -1L;
+        Long rs = 0L;
         String path = getConsumerPath(topicPartition, sfMm2ConsumerGroupId);
         try {
-            byte[] data = sourceZkClient.getData().forPath(path);
-            if (data != null) {
-                rs = Long.parseLong(new String(data));
+
+            Stat stat = sourceZkClient.checkExists().forPath(path);
+            if (stat == null) {
+                sourceZkClient.create().creatingParentsIfNeeded().forPath(path, "-1".getBytes(StandardCharsets.UTF_8));
+            } else {
+                byte[] data = sourceZkClient.getData().forPath(path);
+                if (data != null) {
+                    rs = Long.parseLong(new String(data));
+                }
             }
+
         } catch (Exception e) {
             log.warn("启动时获取offset报错，ZK路径{}", path, e);
         }
 
-        return rs + 1;
+        return rs;
     }
 
     private void checkBidirectionSync(String targetClusterZkConnect, String groupId) {
