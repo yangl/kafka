@@ -16,7 +16,9 @@
  */
 package org.apache.kafka.connect.mirror;
 
+import static org.apache.http.entity.ContentType.APPLICATION_JSON;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_CONSUMER_GROUP_ID_KEY;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_OFFSET_MAPPING_SAVE_URL_KEY;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.PROVENANCE_HEADER_ENABLE_KEY;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.REPLICATOR_ID_KEY;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.SOURCE_CLUSTER_ZOOKEEPER_CONNECT;
@@ -25,7 +27,9 @@ import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.getConsumer
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.getConsumerOwnersPath;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.getConsumerPath;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
@@ -41,10 +45,18 @@ import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.BoundedExponentialBackoffRetry;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.protocol.HTTP;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.KafkaException;
@@ -75,6 +87,10 @@ public class MirrorSourceTask extends SourceTask {
     private KafkaProducer<byte[], byte[]> offsetProducer;
     private String sourceClusterAlias;
     private String targetClusterAlias;
+
+    private String sourceClusterBootstrapServers;
+    private String targetClusterBootstrapServers;
+
     private String offsetSyncsTopic;
     private Duration pollTimeout;
     private long maxOffsetLag;
@@ -99,6 +115,12 @@ public class MirrorSourceTask extends SourceTask {
     private boolean provenanceHeaderEnable = false;
 
     private static final JsonMapper JSON_MAPPER = new JsonMapper();
+
+    // offset mapping
+    private String offsetMappingSaveServer;
+    private static final CloseableHttpClient HTTP_CLIENT = HttpClientBuilder.create().setDefaultRequestConfig(
+            RequestConfig.custom().setConnectTimeout(3000).setSocketTimeout(3000).setConnectionRequestTimeout(3000)
+                    .build()).build();
 
     // 消费组clientId
     private static Method getClientIdMethod;
@@ -129,6 +151,7 @@ public class MirrorSourceTask extends SourceTask {
 
     @Override
     public void start(Map<String, String> props) {
+        offsetMappingSaveServer = System.getProperty(MM2_OFFSET_MAPPING_SAVE_URL_KEY);
         sfMm2ConsumerGroupId = System.getProperty(MM2_CONSUMER_GROUP_ID_KEY);
         provenanceHeaderEnable = Boolean
                 .valueOf(System.getProperty(PROVENANCE_HEADER_ENABLE_KEY, Boolean.FALSE.toString()));
@@ -147,6 +170,12 @@ public class MirrorSourceTask extends SourceTask {
         consumerAccess = new Semaphore(1);  // let one thread at a time access the consumer
         sourceClusterAlias = config.sourceClusterAlias();
         targetClusterAlias = config.targetClusterAlias();
+
+        sourceClusterBootstrapServers =
+                (String) config.sourceConsumerConfig().get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG);
+        targetClusterBootstrapServers =
+                (String) config.targetProducerConfig().get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG);
+
         metrics = config.metrics();
         pollTimeout = config.consumerPollTimeout();
         maxOffsetLag = config.maxOffsetLag();
@@ -327,6 +356,9 @@ public class MirrorSourceTask extends SourceTask {
             // Too many outstanding offset syncs.
             return;
         }
+
+        saveOffsetMapping(topicPartition, upstreamOffset, downstreamOffset);
+
         OffsetSync offsetSync = new OffsetSync(topicPartition, upstreamOffset, downstreamOffset);
         ProducerRecord<byte[], byte[]> record = new ProducerRecord<>(offsetSyncsTopic, 0,
                 offsetSync.recordKey(), offsetSync.recordValue());
@@ -339,6 +371,25 @@ public class MirrorSourceTask extends SourceTask {
             }
             outstandingOffsetSyncs.release();
         });
+
+    }
+
+    // offset mapping save
+    private void saveOffsetMapping(TopicPartition topicPartition, long upstreamOffset, long downstreamOffset) {
+        SFOffsetSaveRequest.TopicPartitionOffsetPair offsetPair =
+                new SFOffsetSaveRequest.TopicPartitionOffsetPair(topicPartition.topic(), topicPartition.partition(),
+                        upstreamOffset, downstreamOffset);
+        SFOffsetSaveRequest request =
+                new SFOffsetSaveRequest(sourceClusterBootstrapServers, targetClusterBootstrapServers,
+                        Lists.newArrayList(offsetPair));
+        try {
+            HttpPost post = new HttpPost(offsetMappingSaveServer);
+            post.addHeader(HTTP.CONTENT_TYPE, APPLICATION_JSON.toString());
+            post.setEntity(new StringEntity(JSON_MAPPER.writeValueAsString(request)));
+            HTTP_CLIENT.execute(post).close();
+        } catch (IOException e) {
+            log.error("报错offset-mapping报错", e);
+        }
     }
 
     private Map<TopicPartition, Long> loadOffsets(Set<TopicPartition> topicPartitions) {
@@ -516,4 +567,5 @@ public class MirrorSourceTask extends SourceTask {
             return shouldSyncOffsets;
         }
     }
+
 }

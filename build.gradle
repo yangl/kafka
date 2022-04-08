@@ -2577,6 +2577,8 @@ project(':connect:mirror') {
       exclude module: 'log4j'
     }
 
+    implementation libs.httpclient
+
     testImplementation libs.junitJupiter
     testImplementation libs.mockitoCore
     testImplementation project(':clients').sourceSets.test.output
