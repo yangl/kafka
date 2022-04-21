@@ -205,23 +205,24 @@ public class MirrorSourceTask extends SourceTask {
         if (taskTopicPartitions == null) {
             return;
         }
+
         // 保存消费组offset至zk，兼容现有zk消费组offset同步机制
         taskTopicPartitions.forEach(topicPartition -> {
             Long upstreamOffset = loadOffset(topicPartition);
-            if (upstreamOffset != null) {
+            if (upstreamOffset != null && upstreamOffset.longValue() > 0) {
                 byte[] data = String.valueOf(upstreamOffset).getBytes(StandardCharsets.UTF_8);
                 String path = getConsumerPath(topicPartition, sfMm2ConsumerGroupId);
                 try {
                     sourceZkClient.create().orSetData().creatingParentsIfNeeded().forPath(path, data);
-                    log.debug("设置消费组offset报错，消费组{}，主题分区{}-{}，位点offset {}", sfMm2ConsumerGroupId, topicPartition.topic(),
-                            topicPartition.partition(), upstreamOffset);
                 } catch (Exception e) {
-                    log.error("设置消费组offset报错，消费组{}，主题分区{}-{}，位点offset {}", sfMm2ConsumerGroupId, topicPartition.topic(),
+                    log.error("提交消费组offset报错，消费组{}，主题分区{}-{}，位点offset {}", sfMm2ConsumerGroupId,
+                            topicPartition.topic(),
                             topicPartition.partition(), upstreamOffset, e);
                 }
             }
 
         });
+
     }
 
     @Override
@@ -237,7 +238,7 @@ public class MirrorSourceTask extends SourceTask {
         Utils.closeQuietly(consumer, "source consumer");
         Utils.closeQuietly(offsetProducer, "offset producer");
         Utils.closeQuietly(metrics, "metrics");
-        Utils.closeQuietly(sourceZkClient, "source zk client");
+        // Utils.closeQuietly(sourceZkClient, "source zk client");
         log.info("Stopping {} took {} ms.", Thread.currentThread().getName(), System.currentTimeMillis() - start);
     }
 
@@ -382,14 +383,18 @@ public class MirrorSourceTask extends SourceTask {
         SFOffsetSaveRequest request =
                 new SFOffsetSaveRequest(sourceClusterBootstrapServers, targetClusterBootstrapServers,
                         Lists.newArrayList(offsetPair));
-        try {
-            HttpPost post = new HttpPost(offsetMappingSaveServer);
-            post.addHeader(HTTP.CONTENT_TYPE, APPLICATION_JSON.toString());
-            post.setEntity(new StringEntity(JSON_MAPPER.writeValueAsString(request)));
-            HTTP_CLIENT.execute(post).close();
-        } catch (IOException e) {
-            log.error("报错offset-mapping报错", e);
+
+        if (offsetMappingSaveServer != null) {
+            try {
+                HttpPost post = new HttpPost(offsetMappingSaveServer);
+                post.addHeader(HTTP.CONTENT_TYPE, APPLICATION_JSON.toString());
+                post.setEntity(new StringEntity(JSON_MAPPER.writeValueAsString(request)));
+                HTTP_CLIENT.execute(post).close();
+            } catch (IOException e) {
+                log.error("报错offset-mapping报错", e);
+            }
         }
+
     }
 
     private Map<TopicPartition, Long> loadOffsets(Set<TopicPartition> topicPartitions) {

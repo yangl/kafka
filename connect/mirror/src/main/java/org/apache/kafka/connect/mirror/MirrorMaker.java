@@ -308,7 +308,9 @@ public class MirrorMaker {
                     config.getOrDefault(PROVENANCE_HEADER_ENABLE_KEY, Boolean.FALSE.toString()));
 
             // offset mapping 保存地址
-            System.setProperty(MM2_OFFSET_MAPPING_SAVE_URL_KEY, config.get(MM2_OFFSET_MAPPING_SAVE_SERVER_URL));
+            if (config.get(MM2_OFFSET_MAPPING_SAVE_SERVER_URL) != null) {
+                System.setProperty(MM2_OFFSET_MAPPING_SAVE_URL_KEY, config.get(MM2_OFFSET_MAPPING_SAVE_SERVER_URL));
+            }
 
             MirrorMaker mirrorMaker = new MirrorMaker(config, clusters, Time.SYSTEM);
 
