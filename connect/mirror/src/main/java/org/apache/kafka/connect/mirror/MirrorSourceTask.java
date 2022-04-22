@@ -108,6 +108,8 @@ public class MirrorSourceTask extends SourceTask {
     private String sourceClusterZkConnect;
     // 上游集群消费组zk客户端
     private CuratorFramework sourceZkClient;
+    private final RetryPolicy ZK_RETRY_POLICY = new BoundedExponentialBackoffRetry(100, 10000, 10);
+
 
     // 同步消费组名称
     private String sfMm2ConsumerGroupId;
@@ -161,8 +163,7 @@ public class MirrorSourceTask extends SourceTask {
 
         // 上游zk初始化
         sourceClusterZkConnect = props.get(SOURCE_CLUSTER_ZOOKEEPER_CONNECT);
-        RetryPolicy retryPolicy = new BoundedExponentialBackoffRetry(100, 10000, 10);
-        sourceZkClient = CuratorFrameworkFactory.newClient(sourceClusterZkConnect, retryPolicy);
+        sourceZkClient = CuratorFrameworkFactory.newClient(sourceClusterZkConnect, ZK_RETRY_POLICY);
         sourceZkClient.start();
 
         MirrorTaskConfig config = new MirrorTaskConfig(props);
