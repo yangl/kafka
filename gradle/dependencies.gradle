@@ -129,6 +129,7 @@ versions += [
   swaggerJaxrs2: "2.2.8",
   zinc: "1.8.0",
   zookeeper: "3.6.4",
+  curator: "5.5.0",
   zstd: "1.5.5-1"
 ]
 libs += [
@@ -216,6 +217,7 @@ libs += [
   swaggerAnnotations: "io.swagger.core.v3:swagger-annotations:$versions.swaggerAnnotations",
   swaggerJaxrs2: "io.swagger.core.v3:swagger-jaxrs2:$versions.swaggerJaxrs2",
   zookeeper: "org.apache.zookeeper:zookeeper:$versions.zookeeper",
+  curator: "org.apache.curator:curator-recipes:$versions.curator",
   jfreechart: "jfreechart:jfreechart:$versions.jfreechart",
   mavenArtifact: "org.apache.maven:maven-artifact:$versions.mavenArtifact",
   zstd: "com.github.luben:zstd-jni:$versions.zstd",

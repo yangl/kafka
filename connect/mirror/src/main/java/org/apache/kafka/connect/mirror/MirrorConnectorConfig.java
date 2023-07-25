@@ -30,6 +30,8 @@ import org.apache.kafka.connect.runtime.ConnectorConfig;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET_CONFIG;
 import static org.apache.kafka.common.config.ConfigDef.CaseInsensitiveValidString.in;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_CONSUMER_GROUP_ID_KEY;
 
 import java.util.Map;
 import java.util.HashMap;
@@ -164,6 +166,7 @@ public abstract class MirrorConnectorConfig extends AbstractConfig {
         result.putAll(Utils.entriesWithPrefix(props, SOURCE_PREFIX + CONSUMER_CLIENT_PREFIX));
         result.put(ENABLE_AUTO_COMMIT_CONFIG, "false");
         result.putIfAbsent(AUTO_OFFSET_RESET_CONFIG, "earliest");
+        result.put(GROUP_ID_CONFIG, System.getProperty(MM2_CONSUMER_GROUP_ID_KEY));
         return result;
     }
 

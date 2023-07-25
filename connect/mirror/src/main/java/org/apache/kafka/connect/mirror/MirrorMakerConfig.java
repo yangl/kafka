@@ -193,6 +193,7 @@ public class MirrorMakerConfig extends AbstractConfig {
         props.putAll(stringsWithPrefix("task"));
         props.putAll(stringsWithPrefix("worker"));
         props.putAll(stringsWithPrefix("replication.policy"));
+        props.putAll(stringsWithPrefix("group.id"));
 
         // transform any expression like ${provider:path:key}, since the worker doesn't do so
         props = transform(props);
