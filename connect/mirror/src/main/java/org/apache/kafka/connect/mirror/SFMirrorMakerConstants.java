@@ -17,6 +17,8 @@ public class SFMirrorMakerConstants {
     public static final String CONSUMER_IDS_PATH_FORMAT = "/consumers/%s/ids";
     public static final String CONSUMER_OWNERS_PATH_FORMAT = "/consumers/%s/owners/%s/%d";
 
+    public static final String MM2_CONSUMER_IDS_PATH_FORMAT = "/mm2-sync/data/%s/ids";
+
     public static final String REPLICATOR_ID_KEY = "__SF_REPLICATOR_ID";
 
     public static final String PROVENANCE_HEADER_ENABLE_KEY = "provenance.header.enable";
@@ -33,8 +35,14 @@ public class SFMirrorMakerConstants {
         return String.format(CONSUMER_IDS_PATH_FORMAT, groupId);
     }
 
-    // 获取消费组ids路径
+    // 获取消费组owners路径
     public static final String getConsumerOwnersPath(String groupId, TopicPartition tp) {
         return String.format(CONSUMER_OWNERS_PATH_FORMAT, groupId, tp.topic(), tp.partition());
+    }
+
+
+    // 获取mm2消费组路径
+    public static final String getMM2ConsumerGroupIdsPath(String groupId) {
+        return String.format(MM2_CONSUMER_IDS_PATH_FORMAT, groupId);
     }
 }

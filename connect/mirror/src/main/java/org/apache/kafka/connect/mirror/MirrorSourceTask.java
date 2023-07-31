@@ -23,6 +23,11 @@ import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.BoundedExponentialBackoffRetry;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.KafkaAdminClient;
+import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsSpec;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.source.SourceTask;
@@ -50,17 +55,14 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Set;
-import java.util.ArrayList;
+import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 import java.util.concurrent.Semaphore;
 import java.time.Duration;
 
+import static org.apache.kafka.connect.mirror.MirrorSourceConfig.OFFSET_SYNCS_SOURCE_ADMIN_ROLE;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.*;
 
 /** Replicates a set of topic-partitions. */
@@ -94,6 +96,8 @@ public class MirrorSourceTask extends SourceTask {
     private CuratorFramework sourceZkClient;
     private final RetryPolicy ZK_RETRY_POLICY = new BoundedExponentialBackoffRetry(100, 10000, 10);
 
+    // 上游集群AdminClient
+    private AdminClient sourceClusterAdminClient;
 
     // 同步消费组名称
     private String sfMm2ConsumerGroupId;
@@ -113,6 +117,10 @@ public class MirrorSourceTask extends SourceTask {
         }
         getClientIdMethod.setAccessible(true);
     }
+
+    // zk offset sync job
+    private Scheduler scheduler;
+
 
     public MirrorSourceTask() {}
 
@@ -136,14 +144,13 @@ public class MirrorSourceTask extends SourceTask {
     @Override
     public void start(Map<String, String> props) {
         sfMm2ConsumerGroupId = System.getProperty(MM2_CONSUMER_GROUP_ID_KEY);
-        provenanceHeaderEnable = Boolean
-                .valueOf(System.getProperty(PROVENANCE_HEADER_ENABLE_KEY, Boolean.FALSE.toString()));
+        provenanceHeaderEnable = Boolean.valueOf(System.getProperty(PROVENANCE_HEADER_ENABLE_KEY, Boolean.FALSE.toString()));
         String targetClusterZkServers = props.get(TARGET_CLUSTER_ZOOKEEPER_SERVERS);
 
         if (Strings.isNullOrEmpty(props.get(SOURCE_CLUSTER_ZOOKEEPER_SERVERS))
                 || Strings.isNullOrEmpty(props.get(TARGET_CLUSTER_ZOOKEEPER_SERVERS))) {
             log.error("上下游集群ZK为必配项！");
-            Exit.exit(4);
+            Exit.exit(7);
         }
 
         // 循环同步检测
@@ -169,7 +176,8 @@ public class MirrorSourceTask extends SourceTask {
         consumer = MirrorUtils.newConsumer(config.sourceConsumerConfig("replication-consumer"));
         offsetProducer = MirrorUtils.newProducer(config.offsetSyncsTopicProducerConfig());
         taskTopicPartitions = config.taskTopicPartitions();
-        Map<TopicPartition, Long> topicPartitionOffsets = loadOffsetsFromZk(taskTopicPartitions);
+        sourceClusterAdminClient = AdminClient.create(config.sourceAdminConfig(OFFSET_SYNCS_SOURCE_ADMIN_ROLE));
+        Map<TopicPartition, Long> topicPartitionOffsets = loadOffsetsFromTopic(taskTopicPartitions);
         //  Map<TopicPartition, Long> topicPartitionOffsets = loadOffsets(taskTopicPartitions);
         consumer.assign(topicPartitionOffsets.keySet());
         log.info("Starting with {} previously uncommitted partitions.", topicPartitionOffsets.entrySet().stream()
@@ -179,9 +187,16 @@ public class MirrorSourceTask extends SourceTask {
         log.info("{} replicating {} topic-partitions {}->{}: {}.", Thread.currentThread().getName(),
             taskTopicPartitions.size(), sourceClusterAlias, config.targetClusterAlias(), taskTopicPartitions);
 
-        // 注册当前task至消费组ids&owners下
+        // 注册当前task至消费组ids下
         registerConsumerInZK();
 
+        scheduler = new Scheduler(getClass(), config.entityLabel(), config.adminTimeout());
+        scheduler.scheduleRepeatingDelayed(() -> {
+            System.err.println("________________offset_____________");
+            String group = "";
+            // RemoteClusterUtils.translateOffsets(props, targetClusterAlias, group, config.adminTimeout());
+
+        }, Duration.ofSeconds(5), "同步旧消费组位点(zk based offset)至下游集群");
     }
 
     @Override
@@ -194,22 +209,21 @@ public class MirrorSourceTask extends SourceTask {
             return;
         }
 
+        Map<TopicPartition, OffsetAndMetadata> offsets = Maps.newHashMap();
         // 保存消费组offset至zk，兼容现有zk消费组offset同步机制
         taskTopicPartitions.forEach(topicPartition -> {
             Long upstreamOffset = loadOffset(topicPartition);
             if (upstreamOffset != null && upstreamOffset.longValue() > 0) {
-                byte[] data = String.valueOf(upstreamOffset).getBytes(StandardCharsets.UTF_8);
-                String path = getConsumerPath(topicPartition, sfMm2ConsumerGroupId);
-                try {
-                    sourceZkClient.create().orSetData().creatingParentsIfNeeded().forPath(path, data);
-                } catch (Exception e) {
-                    log.error("提交消费组offset报错，消费组{}，主题分区{}-{}，位点offset {}", sfMm2ConsumerGroupId,
-                            topicPartition.topic(),
-                            topicPartition.partition(), upstreamOffset, e);
-                }
+                offsets.put(topicPartition, new OffsetAndMetadata(upstreamOffset));
             }
 
         });
+
+        // 保存消费组offset至 __consumer_offsets
+        if (!offsets.isEmpty()){
+            sourceClusterAdminClient.alterConsumerGroupOffsets(sfMm2ConsumerGroupId, offsets);
+        }
+
     }
 
     @Override
@@ -394,74 +408,37 @@ public class MirrorSourceTask extends SourceTask {
         return MirrorUtils.unwrapOffset(wrappedOffset) + 1;
     }
 
-    // 启动的时候从zk获取offset
-    private Map<TopicPartition, Long> loadOffsetsFromZk(Set<TopicPartition> topicPartitions) {
-        return topicPartitions.stream().collect(Collectors.toMap(x -> x, this::loadOffsetFromZk));
-    }
+    // 启动的时候从topic获取offset
+    private Map<TopicPartition, Long> loadOffsetsFromTopic(Set<TopicPartition> topicPartitions) {
+        Map<TopicPartition, Long> rs = Maps.newHashMap();
+        Map<String, ListConsumerGroupOffsetsSpec> groupSpecs = Collections.singletonMap(sfMm2ConsumerGroupId,
+                new ListConsumerGroupOffsetsSpec().topicPartitions(topicPartitions));
 
-    private Long loadOffsetFromZk(TopicPartition topicPartition) {
-        Long rs = 0L;
-        String path = getConsumerPath(topicPartition, sfMm2ConsumerGroupId);
+        KafkaFuture<Map<TopicPartition, OffsetAndMetadata>> future = sourceClusterAdminClient
+                .listConsumerGroupOffsets(groupSpecs).partitionsToOffsetAndMetadata(sfMm2ConsumerGroupId);
+
         try {
-
-            Stat stat = sourceZkClient.checkExists().forPath(path);
-            if (stat == null) {
-                sourceZkClient.create().creatingParentsIfNeeded().forPath(path, "0".getBytes(StandardCharsets.UTF_8));
-            } else {
-                byte[] data = sourceZkClient.getData().forPath(path);
-                if (data != null) {
-                    rs = Long.parseLong(new String(data));
-                }
-            }
-
-        } catch (Exception e) {
-            log.warn("启动时获取offset报错，ZK路径{}", path, e);
+            future.get().forEach((topicPartition, offsetAndMetadata) -> rs.put(topicPartition, offsetAndMetadata != null ? offsetAndMetadata.offset() : 0L));
+        } catch (InterruptedException | ExecutionException e) {
+            log.warn("启动时获取offset报错", e);
         }
 
-        return Math.max(0L, rs);
+        return rs;
     }
 
-    // 注册当前task至消费组ids owners下
+    // 注册当前task至mm2消费组ids下
     private void registerConsumerInZK() {
-        //{
-        //  "version": 1,
-        //  "subscription": {
-        //    "EOS_FOP_QMS_SX_EXCEPWAYBILLINFO": 1
-        //  },
-        //  "pattern": "static",
-        //  "timestamp": "1644262684333"
-        //}
-        Map<String, Integer> topicCount = Maps.newHashMap();
-        taskTopicPartitions.forEach(tp -> topicCount.putIfAbsent(tp.topic(), 1));
-
-        Map<String, Object> consumerData = Maps.newHashMap();
-        consumerData.put("version", 1);
-        consumerData.put("pattern", "static");
-        consumerData.put("timestamp", String.valueOf(System.currentTimeMillis()));
-        consumerData.put("subscription", topicCount);
-
         try {
             // ids
-            String idsPath = getConsumerGroupIdsPath(sfMm2ConsumerGroupId);
+            String consumerIdPath = getMM2ConsumerGroupIdsPath(sfMm2ConsumerGroupId);
             String clientId = InetAddress.getLocalHost().getHostAddress() + "-" + getClientIdMethod.invoke(consumer);
             sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
-                    .forPath(idsPath + "/" + clientId, JSON_MAPPER.writeValueAsBytes(consumerData));
-
-            // owners
-            taskTopicPartitions.forEach(tp -> {
-                String path = getConsumerOwnersPath(sfMm2ConsumerGroupId, tp);
-                try {
-                    sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
-                            .forPath(path, clientId.getBytes(StandardCharsets.UTF_8));
-                } catch (Exception e) {
-                    log.error("设置消费者owner报错", e);
-                }
-            });
+                    .forPath(consumerIdPath + "/" + clientId, clientId.getBytes(StandardCharsets.UTF_8));
 
         } catch (KeeperException.NodeExistsException e) {
             // ignore
         } catch (Exception e) {
-            log.error("注册当前消费组id报错", e);
+            log.error("注册MM2当前消费组id报错", e);
             stop();
             Exit.exit(6);
         }
@@ -473,15 +450,13 @@ public class MirrorSourceTask extends SourceTask {
         CuratorFramework targetZkClient = CuratorFrameworkFactory.newClient(targetClusterZkServers, retryPolicy);
         targetZkClient.start();
 
-        String path = "/consumers/" + groupId + "/ids";
+        String consumerIdPath = getMM2ConsumerGroupIdsPath(groupId);
         try {
-            Stat stat = targetZkClient.checkExists().forPath(path);
+            Stat stat = targetZkClient.checkExists().forPath(consumerIdPath);
             if (stat != null) {
-                List<String> consumerIds = targetZkClient.getChildren()
-                        .forPath(path);
+                List<String> consumerIds = targetZkClient.getChildren().forPath(consumerIdPath);
                 targetZkClient.close();
                 if (consumerIds != null && consumerIds.size() > 0) {
-
                     String msg = String.format("循环同步了！请确认下游集群[%s]同步消费组[%s]是否还在运行中？", targetClusterZkServers,
                             groupId);
                     System.err.println(msg);
