@@ -24,28 +24,26 @@ import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.BoundedExponentialBackoffRetry;
 import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.KafkaAdminClient;
 import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsSpec;
-import org.apache.kafka.clients.consumer.OffsetAndMetadata;
-import org.apache.kafka.common.KafkaFuture;
-import org.apache.kafka.common.utils.Exit;
-import org.apache.kafka.connect.data.Schema;
-import org.apache.kafka.connect.source.SourceTask;
-import org.apache.kafka.connect.source.SourceRecord;
-import org.apache.kafka.connect.header.Headers;
-import org.apache.kafka.connect.header.ConnectHeaders;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.clients.producer.RecordMetadata;
-import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.header.Header;
-import org.apache.kafka.common.errors.WakeupException;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.KafkaFuture;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.WakeupException;
+import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.Utils;
-
+import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.header.ConnectHeaders;
+import org.apache.kafka.connect.header.Headers;
+import org.apache.kafka.connect.source.SourceRecord;
+import org.apache.kafka.connect.source.SourceTask;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.data.Stat;
@@ -55,12 +53,11 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
-import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
 import java.util.concurrent.Semaphore;
-import java.time.Duration;
+import java.util.stream.Collectors;
 
 import static org.apache.kafka.connect.mirror.MirrorSourceConfig.OFFSET_SYNCS_SOURCE_ADMIN_ROLE;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.*;
@@ -117,10 +114,6 @@ public class MirrorSourceTask extends SourceTask {
         }
         getClientIdMethod.setAccessible(true);
     }
-
-    // zk offset sync job
-    private Scheduler scheduler;
-
 
     public MirrorSourceTask() {}
 
@@ -189,14 +182,6 @@ public class MirrorSourceTask extends SourceTask {
 
         // 注册当前task至消费组ids下
         registerConsumerInZK();
-
-        scheduler = new Scheduler(getClass(), config.entityLabel(), config.adminTimeout());
-        scheduler.scheduleRepeatingDelayed(() -> {
-            System.err.println("________________offset_____________");
-            String group = "";
-            // RemoteClusterUtils.translateOffsets(props, targetClusterAlias, group, config.adminTimeout());
-
-        }, Duration.ofSeconds(5), "同步旧消费组位点(zk based offset)至下游集群");
     }
 
     @Override
@@ -239,7 +224,7 @@ public class MirrorSourceTask extends SourceTask {
         Utils.closeQuietly(consumer, "source consumer");
         Utils.closeQuietly(offsetProducer, "offset producer");
         Utils.closeQuietly(metrics, "metrics");
-        // Utils.closeQuietly(sourceZkClient, "source zk client");
+        Utils.closeQuietly(sourceZkClient, "source zk client");
         log.info("Stopping {} took {} ms.", Thread.currentThread().getName(), System.currentTimeMillis() - start);
     }
    
@@ -287,7 +272,6 @@ public class MirrorSourceTask extends SourceTask {
                         }
                     }
                 }
-
 
                 if (needReplicator) {
                     SourceRecord converted = convertRecord(record);
@@ -435,6 +419,7 @@ public class MirrorSourceTask extends SourceTask {
             sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
                     .forPath(consumerIdPath + "/" + clientId, clientId.getBytes(StandardCharsets.UTF_8));
 
+            sourceZkClient.close();
         } catch (KeeperException.NodeExistsException e) {
             // ignore
         } catch (Exception e) {
@@ -455,7 +440,6 @@ public class MirrorSourceTask extends SourceTask {
             Stat stat = targetZkClient.checkExists().forPath(consumerIdPath);
             if (stat != null) {
                 List<String> consumerIds = targetZkClient.getChildren().forPath(consumerIdPath);
-                targetZkClient.close();
                 if (consumerIds != null && consumerIds.size() > 0) {
                     String msg = String.format("循环同步了！请确认下游集群[%s]同步消费组[%s]是否还在运行中？", targetClusterZkServers,
                             groupId);
@@ -467,6 +451,8 @@ public class MirrorSourceTask extends SourceTask {
             log.error("循环同步探测报错", e);
             Exit.exit(5);
         }
+
+        targetZkClient.close();
 
         log.info("SF Kafka MirrorMaker2 循环同步检测通过 ...");
     }
