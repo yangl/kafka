@@ -13,9 +13,11 @@ public class SFMirrorMakerConstants {
     public static final String SOURCE_CLUSTER_ZOOKEEPER_SERVERS = SOURCE_CLUSTER_PREFIX + ZOOKEEPER_SERVERS;
     public static final String TARGET_CLUSTER_ZOOKEEPER_SERVERS = TARGET_CLUSTER_PREFIX + ZOOKEEPER_SERVERS;
 
-    public static final String CONSUMER_PATH_FORMAT = "/consumers/%s/offsets/%s/%d";
+    public static final String CONSUMERS_PATH = "/consumers";
     public static final String CONSUMER_IDS_PATH_FORMAT = "/consumers/%s/ids";
+    public static final String CONSUMER_OFFSETS_PATH_FORMAT = "/consumers/%s/offsets";
     public static final String CONSUMER_OWNERS_PATH_FORMAT = "/consumers/%s/owners/%s/%d";
+    public static final String CONSUMER_PATH_FORMAT = "/consumers/%s/offsets/%s/%d";
 
     public static final String MM2_CONSUMER_IDS_PATH_FORMAT = "/mm2-sync/data/%s/ids";
 

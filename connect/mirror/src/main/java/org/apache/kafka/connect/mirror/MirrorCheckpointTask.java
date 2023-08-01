@@ -16,12 +16,17 @@
  */
 package org.apache.kafka.connect.mirror;
 
+import org.apache.curator.RetryPolicy;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.retry.BoundedExponentialBackoffRetry;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AlterConsumerGroupOffsetsResult;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;
 import org.apache.kafka.common.ConsumerGroupState;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.errors.UnknownMemberIdException;
+import org.apache.kafka.connect.connector.Task;
 import org.apache.kafka.connect.source.SourceTask;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.data.Schema;
@@ -48,6 +53,9 @@ import java.util.concurrent.ExecutionException;
 import java.time.Duration;
 import java.util.stream.Stream;
 
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.SOURCE_CLUSTER_ZOOKEEPER_SERVERS;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.TARGET_CLUSTER_ZOOKEEPER_SERVERS;
+
 /** Emits checkpoints for upstream consumer groups. */
 public class MirrorCheckpointTask extends SourceTask {
 
@@ -69,6 +77,14 @@ public class MirrorCheckpointTask extends SourceTask {
     private Scheduler scheduler;
     private Map<String, Map<TopicPartition, OffsetAndMetadata>> idleConsumerGroupsOffset;
     private Map<String, Map<TopicPartition, Checkpoint>> checkpointsPerConsumerGroup;
+
+    private final RetryPolicy ZK_RETRY_POLICY = new BoundedExponentialBackoffRetry(100, 10000, 10);
+
+    // 上游集群消费组zk客户端
+    private CuratorFramework sourceZkClient;
+    private CuratorFramework targetZkClient;
+
+
     public MirrorCheckpointTask() {}
 
     // for testing
@@ -100,6 +116,12 @@ public class MirrorCheckpointTask extends SourceTask {
         offsetSyncStore = new OffsetSyncStore(config);
         sourceAdminClient = config.forwardingAdmin(config.sourceAdminConfig("checkpoint-source-admin"));
         targetAdminClient = config.forwardingAdmin(config.targetAdminConfig("checkpoint-target-admin"));
+
+        sourceZkClient = CuratorFrameworkFactory.newClient(props.get(SOURCE_CLUSTER_ZOOKEEPER_SERVERS), ZK_RETRY_POLICY);
+        sourceZkClient.start();
+        targetZkClient = CuratorFrameworkFactory.newClient(props.get(TARGET_CLUSTER_ZOOKEEPER_SERVERS), ZK_RETRY_POLICY);
+        targetZkClient.start();
+
         metrics = config.metrics();
         idleConsumerGroupsOffset = new HashMap<>();
         checkpointsPerConsumerGroup = new HashMap<>();
@@ -110,6 +132,9 @@ public class MirrorCheckpointTask extends SourceTask {
                     "refreshing idle consumers group offsets at target cluster");
             scheduler.scheduleRepeatingDelayed(this::syncGroupOffset, config.syncGroupOffsetsInterval(),
                     "sync idle consumer group offset from source to target");
+
+            scheduler.scheduleRepeatingDelayed(() -> ZkOffsetUtils.syncOffsets(sourceZkClient, targetZkClient, offsetSyncStore),
+                    config.syncGroupOffsetsInterval(), "同步基于ZK的业务消费组位点至下游");
         }, "starting offset sync store");
         log.info("{} checkpointing {} consumer groups {}->{}: {}.", Thread.currentThread().getName(),
                 consumerGroups.size(), sourceClusterAlias, config.targetClusterAlias(), consumerGroups);
@@ -128,6 +153,8 @@ public class MirrorCheckpointTask extends SourceTask {
         Utils.closeQuietly(offsetSyncStore, "offset sync store");
         Utils.closeQuietly(sourceAdminClient, "source admin client");
         Utils.closeQuietly(targetAdminClient, "target admin client");
+        Utils.closeQuietly(sourceZkClient, "source zk client");
+        Utils.closeQuietly(targetZkClient, "target zk client");
         Utils.closeQuietly(metrics, "metrics");
         Utils.closeQuietly(scheduler, "scheduler");
         log.info("Stopping {} took {} ms.", Thread.currentThread().getName(), System.currentTimeMillis() - start);
