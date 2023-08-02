@@ -19,6 +19,7 @@ package org.apache.kafka.connect.mirror;
 import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.leader.LeaderLatch;
 import org.apache.curator.retry.BoundedExponentialBackoffRetry;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AlterConsumerGroupOffsetsResult;
@@ -26,7 +27,7 @@ import org.apache.kafka.clients.admin.ConsumerGroupDescription;
 import org.apache.kafka.common.ConsumerGroupState;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.errors.UnknownMemberIdException;
-import org.apache.kafka.connect.connector.Task;
+import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.connect.source.SourceTask;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.data.Schema;
@@ -35,26 +36,24 @@ import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.RecordMetadata;
 
+import org.apache.zookeeper.CreateMode;
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.data.Stat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
+import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.Map;
-import java.util.List;
-import java.util.ArrayList;
-import java.util.Optional;
-import java.util.OptionalLong;
-import java.util.Set;
-import java.util.Collections;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.concurrent.ExecutionException;
 import java.time.Duration;
 import java.util.stream.Stream;
 
-import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.SOURCE_CLUSTER_ZOOKEEPER_SERVERS;
-import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.TARGET_CLUSTER_ZOOKEEPER_SERVERS;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.*;
 
 /** Emits checkpoints for upstream consumer groups. */
 public class MirrorCheckpointTask extends SourceTask {
@@ -83,6 +82,9 @@ public class MirrorCheckpointTask extends SourceTask {
     // 上游集群消费组zk客户端
     private CuratorFramework sourceZkClient;
     private CuratorFramework targetZkClient;
+    private LeaderLatch latch;
+
+    private String taskId;
 
 
     public MirrorCheckpointTask() {}
@@ -122,6 +124,10 @@ public class MirrorCheckpointTask extends SourceTask {
         targetZkClient = CuratorFrameworkFactory.newClient(props.get(TARGET_CLUSTER_ZOOKEEPER_SERVERS), ZK_RETRY_POLICY);
         targetZkClient.start();
 
+        taskId = getIp() + "-" + UUID.randomUUID();
+        checkBidirectionSync();
+        registerOffsetsSyncJobInZK();
+
         metrics = config.metrics();
         idleConsumerGroupsOffset = new HashMap<>();
         checkpointsPerConsumerGroup = new HashMap<>();
@@ -133,8 +139,8 @@ public class MirrorCheckpointTask extends SourceTask {
             scheduler.scheduleRepeatingDelayed(this::syncGroupOffset, config.syncGroupOffsetsInterval(),
                     "sync idle consumer group offset from source to target");
 
-            scheduler.scheduleRepeatingDelayed(() -> ZkOffsetUtils.syncOffsets(sourceZkClient, targetZkClient, offsetSyncStore),
-                    config.syncGroupOffsetsInterval(), "同步基于ZK的业务消费组位点至下游");
+            scheduler.scheduleRepeatingDelayed(this::syncZkOffset, config.syncGroupOffsetsInterval(),
+                    "同步ZK业务消费组位点至下游任务");
         }, "starting offset sync store");
         log.info("{} checkpointing {} consumer groups {}->{}: {}.", Thread.currentThread().getName(),
                 consumerGroups.size(), sourceClusterAlias, config.targetClusterAlias(), consumerGroups);
@@ -153,10 +159,11 @@ public class MirrorCheckpointTask extends SourceTask {
         Utils.closeQuietly(offsetSyncStore, "offset sync store");
         Utils.closeQuietly(sourceAdminClient, "source admin client");
         Utils.closeQuietly(targetAdminClient, "target admin client");
-        Utils.closeQuietly(sourceZkClient, "source zk client");
-        Utils.closeQuietly(targetZkClient, "target zk client");
         Utils.closeQuietly(metrics, "metrics");
         Utils.closeQuietly(scheduler, "scheduler");
+        Utils.closeQuietly(latch, "latch");
+        Utils.closeQuietly(sourceZkClient, "source zk client");
+        Utils.closeQuietly(targetZkClient, "target zk client");
         log.info("Stopping {} took {} ms.", Thread.currentThread().getName(), System.currentTimeMillis() - start);
     }
 
@@ -407,5 +414,54 @@ public class MirrorCheckpointTask extends SourceTask {
             result.put(consumerId, convertedUpstreamOffset);
         }
         return result;
+    }
+
+
+    // 注册当前task至mm2消费组ids下
+    private void registerOffsetsSyncJobInZK() {
+        try {
+            sourceZkClient.create().orSetData().creatingParentContainersIfNeeded().withMode(CreateMode.EPHEMERAL)
+                    .forPath(MM2_OFFSETS_IDS_PATH_FORMAT + "/" + taskId, taskId.getBytes(StandardCharsets.UTF_8));
+
+
+            // 选举一个task点运行zk同步
+            String latchPath = MM2_OFFSETS_LATCH_PATH_FORMAT;
+            latch = new LeaderLatch(sourceZkClient, latchPath, taskId, LeaderLatch.CloseMode.NOTIFY_LEADER);
+            latch.start();
+
+        } catch (KeeperException.NodeExistsException e) {
+            // ignore
+        } catch (Exception e) {
+            log.error("注册MM2当前消费组id报错", e);
+            stop();
+            Exit.exit(16);
+        }
+    }
+
+    // 循环同步检测
+    private void checkBidirectionSync() {
+        try {
+            Stat stat = targetZkClient.checkExists().forPath(MM2_OFFSETS_IDS_PATH_FORMAT);
+            if (stat != null) {
+                List<String> ids = targetZkClient.getChildren().forPath(MM2_OFFSETS_IDS_PATH_FORMAT);
+                if (ids != null && ids.size() > 0) {
+                    System.err.println("offsets循环同步了！请确认下游集群ZKOFFSETS同步消费组是否还在运行中？");
+                    Exit.exit(14);
+                }
+            }
+        } catch (Exception e) {
+            log.error("offsets循环同步探测报错", e);
+            Exit.exit(15);
+        }
+    }
+
+    // leader task 执行zk offset 同步
+    private void syncZkOffset() {
+        String enable = System.getProperty(MM2_OFFSET_ZK_ENABLE_KEY);
+        if (Boolean.parseBoolean(enable)) {
+            if (latch.hasLeadership()) {
+                ZkOffsetUtils.syncOffsets(sourceZkClient, targetZkClient, offsetSyncStore);
+            }
+        }
     }
 }

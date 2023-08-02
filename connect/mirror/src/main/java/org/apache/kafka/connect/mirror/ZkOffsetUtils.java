@@ -1,5 +1,6 @@
 package org.apache.kafka.connect.mirror;
 
+import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.kafka.common.TopicPartition;
@@ -30,26 +31,29 @@ public class ZkOffsetUtils {
                     int p = Integer.parseInt(partition);
                     TopicPartition tp = new TopicPartition(topic, p);
                     String up = getData(szk, partitionPath + "/" + partition);
-                    OptionalLong down = offsetSyncStore.translateDownstream(group, tp, Long.parseLong(up));
+                    if (!Strings.isNullOrEmpty(up)) {
+                        OptionalLong down = offsetSyncStore.translateDownstream(group, tp, Long.parseLong(up));
 
-                    if (down.isPresent()) {
-                        String path = String.format(CONSUMER_PATH_FORMAT, group, topic, p);
-                        setData(tzk, path, String.valueOf(down.getAsLong()).getBytes());
+                        if (down.isPresent() && down.getAsLong() > 0L) {
+                            String path = String.format(CONSUMER_PATH_FORMAT, group, topic, p);
+                            setData(tzk, path, String.valueOf(down.getAsLong()).getBytes());
+                        }
                     }
+
                 });
             });
         });
     }
 
 
-
-
-
     // 获取子节点
     private static List<String> getChildren(CuratorFramework cli, String path) {
         List<String> rs = Lists.newArrayList();
         try {
-            rs = cli.getChildren().forPath(path);
+            Stat stat = cli.checkExists().forPath(path);
+            if (stat != null) {
+                rs = cli.getChildren().forPath(path);
+            }
         } catch (Exception e) {
             log.error("获取子节点[{}]报错", path, e);
         }
@@ -82,20 +86,6 @@ public class ZkOffsetUtils {
             log.error("设置节点[{}]数据报错", path, e);
         }
     }
-
-    // 获取节点状态
-    private static Stat getStat(CuratorFramework cli, String path) {
-        Stat stat = new Stat();
-        try {
-            cli.getData().storingStatIn(stat).forPath(path);
-        } catch (Exception e) {
-            stat = null;
-            log.error("获取节点[{}]状态报错", path, e);
-        }
-
-        return stat;
-    }
-
 
     // 根据zk获取消费组列表(不排除mirrormaker同步组)
     private static List<String> getZkConsumerGroups(CuratorFramework szk, CuratorFramework tzk) {
