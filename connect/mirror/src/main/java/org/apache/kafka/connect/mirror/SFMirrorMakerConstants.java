@@ -28,9 +28,9 @@ public class SFMirrorMakerConstants {
 
     public static final String REPLICATOR_ID_KEY = "__SF_REPLICATOR_ID";
 
-    public static final String PROVENANCE_HEADER_ENABLE_KEY = "provenance.header.enable";
+    public static final String PROVENANCE_HEADER_ENABLE_KEY = "provenance.header.enabled";
     public static final String MM2_CONSUMER_GROUP_ID_KEY = "SF_MM2_CONSUMER_GROUP_ID";
-    public static final String MM2_OFFSET_ZK_ENABLE_KEY = "offset.zk.enable";
+    public static final String MM2_OFFSET_ZK_ENABLE_KEY = "sync.offset.zk.enabled";
 
 
     // 获取消费组路径
