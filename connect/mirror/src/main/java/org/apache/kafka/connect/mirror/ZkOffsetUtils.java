@@ -35,7 +35,7 @@ public class ZkOffsetUtils {
                         OptionalLong down = offsetSyncStore.translateDownstream(group, tp, Long.parseLong(up));
 
                         if (down.isPresent() && down.getAsLong() > 0L) {
-                            String path = String.format(CONSUMER_PATH_FORMAT, group, topic, p);
+                            String path = String.format(CONSUMER_TOPIC_PARTITION_PATH_FORMAT, group, topic, p);
                             setData(tzk, path, String.valueOf(down.getAsLong()).getBytes());
                         }
                     }
@@ -80,8 +80,7 @@ public class ZkOffsetUtils {
     // 设置节点数据
     private static void setData(CuratorFramework cli, String path, byte[] data) {
         try {
-            cli.create().orSetData().creatingParentContainersIfNeeded()
-                    .forPath(path, data);
+            cli.create().orSetData().creatingParentsIfNeeded().forPath(path, data);
         } catch (Exception e) {
             log.error("设置节点[{}]数据报错", path, e);
         }

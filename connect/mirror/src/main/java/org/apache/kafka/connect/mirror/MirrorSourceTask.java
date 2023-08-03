@@ -87,6 +87,7 @@ public class MirrorSourceTask extends SourceTask {
 
     // 上游集群消费组zk客户端
     private final RetryPolicy ZK_RETRY_POLICY = new BoundedExponentialBackoffRetry(100, 10000, 10);
+    private CuratorFramework sourceZkClient;
 
     // 上游集群AdminClient
     private AdminClient sourceClusterAdminClient;
@@ -94,7 +95,7 @@ public class MirrorSourceTask extends SourceTask {
     // 同步消费组名称
     private String sfMm2ConsumerGroupId;
     // 循环同步消息头检测开关
-    private boolean provenanceHeaderEnable = false;
+    private boolean provenanceHeaderEnabled = false;
 
     // 消费组clientId
     private static Method getClientIdMethod;
@@ -130,7 +131,7 @@ public class MirrorSourceTask extends SourceTask {
     @Override
     public void start(Map<String, String> props) {
         sfMm2ConsumerGroupId = System.getProperty(MM2_CONSUMER_GROUP_ID_KEY);
-        provenanceHeaderEnable = Boolean.valueOf(System.getProperty(PROVENANCE_HEADER_ENABLE_KEY, Boolean.FALSE.toString()));
+        provenanceHeaderEnabled = Boolean.parseBoolean(System.getProperty(PROVENANCE_HEADER_ENABLED_KEY, Boolean.FALSE.toString()));
         String sourceClusterZkServers = props.get(SOURCE_CLUSTER_ZOOKEEPER_SERVERS);
         String targetClusterZkServers = props.get(TARGET_CLUSTER_ZOOKEEPER_SERVERS);
 
@@ -141,6 +142,10 @@ public class MirrorSourceTask extends SourceTask {
 
         // 循环同步检测
         checkBidirectionSync(targetClusterZkServers, sfMm2ConsumerGroupId);
+
+        // 初始化 sourceZkClient
+        sourceZkClient = CuratorFrameworkFactory.newClient(sourceClusterZkServers, ZK_RETRY_POLICY);
+        sourceZkClient.start();
 
         MirrorSourceTaskConfig config = new MirrorSourceTaskConfig(props);
         pendingOffsetSyncs.clear();
@@ -212,6 +217,7 @@ public class MirrorSourceTask extends SourceTask {
         Utils.closeQuietly(consumer, "source consumer");
         Utils.closeQuietly(offsetProducer, "offset producer");
         Utils.closeQuietly(metrics, "metrics");
+        Utils.closeQuietly(sourceZkClient, "source zk client");
         log.info("Stopping {} took {} ms.", Thread.currentThread().getName(), System.currentTimeMillis() - start);
     }
    
@@ -234,7 +240,7 @@ public class MirrorSourceTask extends SourceTask {
             for (ConsumerRecord<byte[], byte[]> record : records) {
                 // 是否需要同步该消息至下游集群
                 boolean needReplicator = true;
-                if (provenanceHeaderEnable) {
+                if (provenanceHeaderEnabled) {
                     Iterable<Header> headers = record.headers().headers(REPLICATOR_ID_KEY);
                     for (Header header : headers) {
                         if (targetClusterAlias.equals(new String(header.value()))) {
@@ -399,13 +405,10 @@ public class MirrorSourceTask extends SourceTask {
 
     // 注册当前task至mm2消费组ids下
     private void registerConsumerInZK(String sourceClusterZkServers) {
-        CuratorFramework sourceZkClient = null;
         try {
             // ids
             String consumerIdPath = getMM2ConsumerGroupIdsPath(sfMm2ConsumerGroupId);
             String clientId = getIp() + "-" + getClientIdMethod.invoke(consumer);
-            sourceZkClient = CuratorFrameworkFactory.newClient(sourceClusterZkServers, ZK_RETRY_POLICY);
-            sourceZkClient.start();
 
             sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
                     .forPath(consumerIdPath + "/" + clientId, clientId.getBytes(StandardCharsets.UTF_8));
@@ -415,8 +418,6 @@ public class MirrorSourceTask extends SourceTask {
             log.error("注册MM2当前消费组id报错", e);
             stop();
             Exit.exit(6);
-        }finally {
-            sourceZkClient.close();
         }
     }
 

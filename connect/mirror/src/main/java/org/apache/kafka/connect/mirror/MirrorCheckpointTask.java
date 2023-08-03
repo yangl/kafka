@@ -42,11 +42,9 @@ import org.apache.zookeeper.data.Stat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.Map.Entry;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.concurrent.ExecutionException;
@@ -85,6 +83,7 @@ public class MirrorCheckpointTask extends SourceTask {
     private LeaderLatch latch;
 
     private String taskId;
+    private boolean syncZkOffsetEnabled;
 
 
     public MirrorCheckpointTask() {}
@@ -125,6 +124,7 @@ public class MirrorCheckpointTask extends SourceTask {
         targetZkClient.start();
 
         taskId = getIp() + "-" + UUID.randomUUID();
+        syncZkOffsetEnabled = Boolean.parseBoolean(System.getProperty(MM2_OFFSET_ZK_ENABLED_KEY));
         checkBidirectionSync();
         registerOffsetsSyncJobInZK();
 
@@ -419,13 +419,20 @@ public class MirrorCheckpointTask extends SourceTask {
 
     // 注册当前task至mm2消费组ids下
     private void registerOffsetsSyncJobInZK() {
-        try {
-            sourceZkClient.create().orSetData().creatingParentContainersIfNeeded().withMode(CreateMode.EPHEMERAL)
-                    .forPath(MM2_OFFSETS_IDS_PATH_FORMAT + "/" + taskId, taskId.getBytes(StandardCharsets.UTF_8));
+        if (!syncZkOffsetEnabled) {
+            return;
+        }
 
+        try {
+            sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
+                    .forPath(MM2_OFFSETS_IDS_PATH_FORMAT + "/" + taskId, taskId.getBytes(StandardCharsets.UTF_8));
 
             // 选举一个task点运行zk同步
             String latchPath = MM2_OFFSETS_LATCH_PATH_FORMAT;
+            Stat stat = sourceZkClient.checkExists().forPath(latchPath);
+            if (stat == null) {
+                sourceZkClient.create().creatingParentsIfNeeded().forPath(latchPath);
+            }
             latch = new LeaderLatch(sourceZkClient, latchPath, taskId, LeaderLatch.CloseMode.NOTIFY_LEADER);
             latch.start();
 
@@ -440,6 +447,10 @@ public class MirrorCheckpointTask extends SourceTask {
 
     // 循环同步检测
     private void checkBidirectionSync() {
+        if (!syncZkOffsetEnabled) {
+            return;
+        }
+
         try {
             Stat stat = targetZkClient.checkExists().forPath(MM2_OFFSETS_IDS_PATH_FORMAT);
             if (stat != null) {
@@ -457,11 +468,12 @@ public class MirrorCheckpointTask extends SourceTask {
 
     // leader task 执行zk offset 同步
     private void syncZkOffset() {
-        String enable = System.getProperty(MM2_OFFSET_ZK_ENABLE_KEY);
-        if (Boolean.parseBoolean(enable)) {
-            if (latch.hasLeadership()) {
-                ZkOffsetUtils.syncOffsets(sourceZkClient, targetZkClient, offsetSyncStore);
-            }
+        if (!syncZkOffsetEnabled) {
+            return;
         }
+        if (latch.hasLeadership()) {
+            ZkOffsetUtils.syncOffsets(sourceZkClient, targetZkClient, offsetSyncStore);
+        }
+
     }
 }
