@@ -3014,6 +3014,7 @@ project(':connect:mirror-client') {
 
   dependencies {
     implementation project(':clients')
+    implementation libs.commonsLang3
     implementation libs.slf4jApi
 
     testImplementation libs.junitJupiter
