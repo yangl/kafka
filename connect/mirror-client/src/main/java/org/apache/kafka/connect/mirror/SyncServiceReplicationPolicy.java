@@ -57,8 +57,6 @@ public class SyncServiceReplicationPolicy extends DefaultReplicationPolicy {
                 }
             }
         }
-
-
     }
 
     /**
@@ -72,7 +70,7 @@ public class SyncServiceReplicationPolicy extends DefaultReplicationPolicy {
         if (looksLikeHeartbeat(topic)) {
             return super.formatRemoteTopic(sourceClusterAlias, topic);
         } else {
-            if (topicMapping.containsKey(topic)){
+            if (topicMapping.containsKey(topic)) {
                 return topicMapping.get(topic);
             }
             return topic;
@@ -105,7 +103,7 @@ public class SyncServiceReplicationPolicy extends DefaultReplicationPolicy {
         if (looksLikeHeartbeat(topic)) {
             return super.upstreamTopic(topic);
         } else {
-            if (topicMappingReverse.containsKey(topic)){
+            if (topicMappingReverse.containsKey(topic)) {
                 return topicMappingReverse.get(topic);
             }
 
