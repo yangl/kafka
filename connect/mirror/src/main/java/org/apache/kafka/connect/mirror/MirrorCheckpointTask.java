@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.connect.mirror;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
@@ -52,6 +53,8 @@ import java.time.Duration;
 import java.util.stream.Stream;
 
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.*;
+import static org.apache.kafka.connect.mirror.ZkOffsetUtils.JSTORM_NAMESPACE;
+import static org.apache.kafka.connect.mirror.ZkOffsetUtils.exists;
 
 /** Emits checkpoints for upstream consumer groups. */
 public class MirrorCheckpointTask extends SourceTask {
@@ -81,6 +84,9 @@ public class MirrorCheckpointTask extends SourceTask {
     private CuratorFramework sourceZkClient;
     private CuratorFramework targetZkClient;
     private LeaderLatch latch;
+
+    private CuratorFramework jstormSourceZkClient;
+    private CuratorFramework jstormTargetZkClient;
 
     private String taskId;
     private boolean syncZkOffsetEnabled;
@@ -118,10 +124,35 @@ public class MirrorCheckpointTask extends SourceTask {
         sourceAdminClient = config.forwardingAdmin(config.sourceAdminConfig("checkpoint-source-admin"));
         targetAdminClient = config.forwardingAdmin(config.targetAdminConfig("checkpoint-target-admin"));
 
-        sourceZkClient = CuratorFrameworkFactory.newClient(props.get(SOURCE_CLUSTER_ZOOKEEPER_SERVERS), ZK_RETRY_POLICY);
+        String szk = props.get(SOURCE_CLUSTER_ZOOKEEPER_SERVERS);
+        sourceZkClient = CuratorFrameworkFactory.newClient(szk, ZK_RETRY_POLICY);
         sourceZkClient.start();
-        targetZkClient = CuratorFrameworkFactory.newClient(props.get(TARGET_CLUSTER_ZOOKEEPER_SERVERS), ZK_RETRY_POLICY);
+
+        String tzk = props.get(TARGET_CLUSTER_ZOOKEEPER_SERVERS);
+        targetZkClient = CuratorFrameworkFactory.newClient(tzk, ZK_RETRY_POLICY);
         targetZkClient.start();
+
+        // JStorm 消费组位点
+        String sJstorm = StringUtils.substringBefore(szk, "/");
+        CuratorFramework sJstormZk = CuratorFrameworkFactory.newClient(sJstorm, ZK_RETRY_POLICY);
+        sJstormZk.start();
+        if (ZkOffsetUtils.exists(sJstormZk, JSTORM_NAMESPACE)) {
+            jstormSourceZkClient = CuratorFrameworkFactory.newClient(sJstorm + JSTORM_NAMESPACE, ZK_RETRY_POLICY);
+            jstormSourceZkClient.start();
+
+            String tJstorm = StringUtils.substringBefore(tzk, "/");
+            CuratorFramework tJstormZk = CuratorFrameworkFactory.newClient(tJstorm, ZK_RETRY_POLICY);
+            tJstormZk.start();
+            if (!ZkOffsetUtils.exists(tJstormZk, JSTORM_NAMESPACE)) {
+                ZkOffsetUtils.create(tJstormZk, JSTORM_NAMESPACE);
+            }
+            tJstormZk.close();
+
+            jstormTargetZkClient = CuratorFrameworkFactory.newClient(tJstorm + JSTORM_NAMESPACE, ZK_RETRY_POLICY);
+            jstormTargetZkClient.start();
+
+        }
+        sJstormZk.close();
 
         taskId = getIp() + "-" + UUID.randomUUID();
         syncZkOffsetEnabled = Boolean.parseBoolean(System.getProperty(MM2_OFFSET_ZK_ENABLED_KEY));
@@ -164,6 +195,8 @@ public class MirrorCheckpointTask extends SourceTask {
         Utils.closeQuietly(latch, "latch");
         Utils.closeQuietly(sourceZkClient, "source zk client");
         Utils.closeQuietly(targetZkClient, "target zk client");
+        Utils.closeQuietly(jstormSourceZkClient, "jstorm source zk client");
+        Utils.closeQuietly(jstormTargetZkClient, "jstorm target zk client");
         log.info("Stopping {} took {} ms.", Thread.currentThread().getName(), System.currentTimeMillis() - start);
     }
 
@@ -472,7 +505,10 @@ public class MirrorCheckpointTask extends SourceTask {
             return;
         }
         if (latch.hasLeadership()) {
-            ZkOffsetUtils.syncOffsets(sourceZkClient, targetZkClient, offsetSyncStore);
+            ZkOffsetUtils.syncZkOffsets(sourceZkClient, targetZkClient, offsetSyncStore);
+            if (jstormSourceZkClient != null && jstormTargetZkClient != null) {
+                ZkOffsetUtils.syncJstormOffsets(jstormSourceZkClient, jstormTargetZkClient, offsetSyncStore);
+            }
         }
 
     }

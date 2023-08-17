@@ -2944,6 +2944,8 @@ project(':connect:mirror') {
     implementation libs.jettyClient
     implementation libs.swaggerAnnotations
 
+    implementation libs.commonsLang3
+    implementation libs.fastjson2
     implementation libs.curator
     implementation(libs.zookeeper) {
       // Dropwizard Metrics are required by ZooKeeper as of v3.6.0,
