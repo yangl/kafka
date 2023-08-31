@@ -339,9 +339,23 @@ CLASSPATH=${CLASSPATH#:}
 # If Cygwin is detected, classpath is converted to Windows format.
 (( CYGWIN )) && CLASSPATH=$(cygpath --path --mixed "${CLASSPATH}")
 
+# topic data sync
+if [ "x$DATA_SYNC_ENABLED" = "xtrue" ]; then
+  DATA_SYNC="-Dsync.topic.data.enabled=true"
+else
+  DATA_SYNC='-Dsync.topic.data.enabled=false'
+fi
+
+# consumer group offset sync (topic zk jstorm )
+if [ "x$OFFSET_SYNC_ENABLED" = "xtrue" ]; then
+  OFFSET_SYNC="-Dsync.group.offsets.enabled=true -Dsync.group.offsets.zk.enabled=true"
+else
+  OFFSET_SYNC='-Dsync.group.offsets.enabled=false -Dsync.group.offsets.zk.enabled=false'
+fi
+
 # Launch mode
 if [ "x$DAEMON_MODE" = "xtrue" ]; then
-  nohup "$JAVA" $KAFKA_HEAP_OPTS $KAFKA_JVM_PERFORMANCE_OPTS $KAFKA_GC_LOG_OPTS $KAFKA_JMX_OPTS $KAFKA_LOG4J_OPTS -cp "$CLASSPATH" $KAFKA_OPTS "$@" > "$CONSOLE_OUTPUT_FILE" 2>&1 < /dev/null &
+  nohup "$JAVA" $KAFKA_HEAP_OPTS $KAFKA_JVM_PERFORMANCE_OPTS $KAFKA_GC_LOG_OPTS $DATA_SYNC $OFFSET_SYNC $KAFKA_JMX_OPTS $KAFKA_LOG4J_OPTS -cp "$CLASSPATH" $KAFKA_OPTS "$@" > "$CONSOLE_OUTPUT_FILE" 2>&1 < /dev/null &
 else
-  exec "$JAVA" $KAFKA_HEAP_OPTS $KAFKA_JVM_PERFORMANCE_OPTS $KAFKA_GC_LOG_OPTS $KAFKA_JMX_OPTS $KAFKA_LOG4J_OPTS -cp "$CLASSPATH" $KAFKA_OPTS "$@"
+  exec "$JAVA" $KAFKA_HEAP_OPTS $KAFKA_JVM_PERFORMANCE_OPTS $KAFKA_GC_LOG_OPTS $DATA_SYNC $OFFSET_SYNC $KAFKA_JMX_OPTS $KAFKA_LOG4J_OPTS -cp "$CLASSPATH" $KAFKA_OPTS "$@"
 fi

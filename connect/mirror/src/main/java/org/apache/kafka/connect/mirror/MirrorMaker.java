@@ -105,11 +105,16 @@ public class MirrorMaker {
 
     private static final long SHUTDOWN_TIMEOUT_SECONDS = 60L;
 
-    public static final List<Class<?>> CONNECTOR_CLASSES = Collections.unmodifiableList(
-            Arrays.asList(
-                    MirrorSourceConnector.class,
-                    MirrorHeartbeatConnector.class,
-                    MirrorCheckpointConnector.class));
+    public static final List<Class<?>> CONNECTOR_CLASSES = Arrays.asList(
+            MirrorHeartbeatConnector.class,
+            MirrorCheckpointConnector.class);
+
+    static {
+        boolean enabed = Boolean.parseBoolean(System.getProperty("sync.topic.data.enabled", "false"));
+        if (enabed) {
+            CONNECTOR_CLASSES.add(MirrorSourceConnector.class);
+        }
+    }
 
     private final Map<SourceAndTarget, Herder> herders = new HashMap<>();
     private CountDownLatch startLatch;
