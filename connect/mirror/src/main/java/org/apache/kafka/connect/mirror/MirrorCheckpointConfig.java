@@ -119,7 +119,10 @@ public class MirrorCheckpointConfig extends MirrorConnectorConfig {
     }
 
     Duration syncGroupOffsetsInterval() {
-        if (getBoolean(SYNC_GROUP_OFFSETS_ENABLED)) {
+        // if (getBoolean(SYNC_GROUP_OFFSETS_ENABLED)) {
+        // offset同步 与 数据同步 分开，直接读 -D 启动参数
+        boolean enabled = Boolean.parseBoolean(System.getProperty(SYNC_GROUP_OFFSETS_ENABLED, "false"));
+        if (enabled) {
             return Duration.ofSeconds(getLong(SYNC_GROUP_OFFSETS_INTERVAL_SECONDS));
         } else {
             // negative interval to disable

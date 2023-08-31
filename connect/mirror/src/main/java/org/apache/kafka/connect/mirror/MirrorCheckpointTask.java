@@ -155,7 +155,7 @@ public class MirrorCheckpointTask extends SourceTask {
         sJstormZk.close();
 
         taskId = getIp() + "-" + UUID.randomUUID();
-        syncZkOffsetEnabled = Boolean.parseBoolean(System.getProperty(MM2_OFFSET_ZK_ENABLED_KEY));
+        syncZkOffsetEnabled = Boolean.parseBoolean(System.getProperty(MM2_OFFSET_ZK_ENABLED_KEY, "false"));
         checkBidirectionSync();
         registerOffsetsSyncJobInZK();
 
