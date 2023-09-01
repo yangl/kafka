@@ -346,7 +346,7 @@ else
   DATA_SYNC='-Dsync.topic.data.enabled=false'
 fi
 
-# consumer group offset sync (topic zk jstorm )
+# consumer group offset sync (topic zk&jstorm )
 if [ "x$OFFSET_SYNC_ENABLED" = "xtrue" ]; then
   OFFSET_SYNC="-Dsync.group.offsets.enabled=true -Dsync.group.offsets.zk.enabled=true"
 else

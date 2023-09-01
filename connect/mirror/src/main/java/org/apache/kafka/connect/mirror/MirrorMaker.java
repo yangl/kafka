@@ -55,6 +55,7 @@ import net.sourceforge.argparse4j.ArgumentParsers;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -105,9 +106,9 @@ public class MirrorMaker {
 
     private static final long SHUTDOWN_TIMEOUT_SECONDS = 60L;
 
-    public static final List<Class<?>> CONNECTOR_CLASSES = Arrays.asList(
-            MirrorHeartbeatConnector.class,
-            MirrorCheckpointConnector.class);
+    public static final List<Class<?>> CONNECTOR_CLASSES = new ArrayList<>(Arrays.asList(
+        MirrorHeartbeatConnector.class,
+        MirrorCheckpointConnector.class));
 
     static {
         boolean enabed = Boolean.parseBoolean(System.getProperty("sync.topic.data.enabled", "false"));
@@ -378,7 +379,7 @@ public class MirrorMaker {
             System.setProperty(MM2_CONSUMER_GROUP_ID_KEY, config.get(GROUP_ID_CONFIG));
             // 设置循环同步消息头检测
             System.setProperty(PROVENANCE_HEADER_ENABLED_KEY,
-                    config.getOrDefault(PROVENANCE_HEADER_ENABLED_KEY, Boolean.FALSE.toString()));
+                config.getOrDefault(PROVENANCE_HEADER_ENABLED_KEY, Boolean.FALSE.toString()));
 
             MirrorMaker mirrorMaker = new MirrorMaker(config, clusters);
 
