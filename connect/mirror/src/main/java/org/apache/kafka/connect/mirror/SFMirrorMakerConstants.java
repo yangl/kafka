@@ -25,7 +25,10 @@ public class SFMirrorMakerConstants {
     public static final String MM2_OFFSETS_LATCH_PATH_FORMAT = "/mm2-sync/offsets/latch";
 
     public static final String MM2_CONSUMER_GROUP_ID_KEY = "mm2.consumer.group.id";
+
     public static final String MM2_OFFSET_ZK_ENABLED_KEY = "sync.group.offsets.zk.enabled";
+    public static final String MM2_TOPIC_DATA_ENABLED_KEY = "sync.topic.data.enabled";
+
 
     public static final String PROVENANCE_HEADER_ENABLED_KEY = "provenance.header.enabled";
     public static final String REPLICATOR_ID_KEY = "__SF_REPLICATOR_ID";

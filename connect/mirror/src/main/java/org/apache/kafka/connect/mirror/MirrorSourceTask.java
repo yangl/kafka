@@ -174,7 +174,7 @@ public class MirrorSourceTask extends SourceTask {
             taskTopicPartitions.size(), sourceClusterAlias, config.targetClusterAlias(), taskTopicPartitions);
 
         // 注册当前task至消费组ids下
-        registerConsumerInZK(sourceClusterZkServers);
+        registerConsumerInZK();
     }
 
     @Override
@@ -404,7 +404,7 @@ public class MirrorSourceTask extends SourceTask {
     }
 
     // 注册当前task至mm2消费组ids下
-    private void registerConsumerInZK(String sourceClusterZkServers) {
+    private void registerConsumerInZK() {
         try {
             // ids
             String consumerIdPath = getMM2ConsumerGroupIdsPath(sfMm2ConsumerGroupId);

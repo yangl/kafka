@@ -55,7 +55,6 @@ import net.sourceforge.argparse4j.ArgumentParsers;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -106,16 +105,11 @@ public class MirrorMaker {
 
     private static final long SHUTDOWN_TIMEOUT_SECONDS = 60L;
 
-    public static final List<Class<?>> CONNECTOR_CLASSES = new ArrayList<>(Arrays.asList(
-        MirrorHeartbeatConnector.class,
-        MirrorCheckpointConnector.class));
-
-    static {
-        boolean enabed = Boolean.parseBoolean(System.getProperty("sync.topic.data.enabled", "false"));
-        if (enabed) {
-            CONNECTOR_CLASSES.add(MirrorSourceConnector.class);
-        }
-    }
+    public static final List<Class<?>> CONNECTOR_CLASSES = Collections.unmodifiableList(
+            Arrays.asList(
+                    MirrorSourceConnector.class,
+                    MirrorHeartbeatConnector.class,
+                    MirrorCheckpointConnector.class));
 
     private final Map<SourceAndTarget, Herder> herders = new HashMap<>();
     private CountDownLatch startLatch;
