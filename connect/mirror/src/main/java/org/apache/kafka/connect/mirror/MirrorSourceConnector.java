@@ -75,7 +75,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static org.apache.kafka.connect.mirror.MirrorSourceConfig.SYNC_TOPIC_ACLS_ENABLED;
-import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_TOPIC_DATA_ENABLED_KEY;
 
 /** Replicate data, configuration, and ACLs between clusters.
  *
@@ -143,16 +142,8 @@ public class MirrorSourceConnector extends SourceConnector {
         this.targetAdminClient = targetAdminClient;
     }
 
-    // 数据同步是否开启
-    private boolean syncTopicDataEnabled(){
-        return Boolean.parseBoolean(System.getProperty(MM2_TOPIC_DATA_ENABLED_KEY, "false"));
-    }
-
     @Override
     public void start(Map<String, String> props) {
-        if (!syncTopicDataEnabled()) {
-            return;
-        }
         long start = System.currentTimeMillis();
         config = new MirrorSourceConfig(props);
         if (!config.enabled()) {
@@ -184,9 +175,6 @@ public class MirrorSourceConnector extends SourceConnector {
 
     @Override
     public void stop() {
-        if (!syncTopicDataEnabled()) {
-            return;
-        }
         long start = System.currentTimeMillis();
         if (!config.enabled()) {
             return;
@@ -216,9 +204,6 @@ public class MirrorSourceConnector extends SourceConnector {
     // t3 -> [t0p2, t0p5, t1p0, t2p1]
     @Override
     public List<Map<String, String>> taskConfigs(int maxTasks) {
-        if (!syncTopicDataEnabled()) {
-            return Collections.emptyList();
-        }
         if (!config.enabled() || knownSourceTopicPartitions.isEmpty()) {
             return Collections.emptyList();
         }
