@@ -374,6 +374,8 @@ public class MirrorMaker {
             // 设置循环同步消息头检测
             System.setProperty(PROVENANCE_HEADER_ENABLED_KEY,
                 config.getOrDefault(PROVENANCE_HEADER_ENABLED_KEY, Boolean.FALSE.toString()));
+            // ZK offset 是否同步
+            System.setProperty(MM2_OFFSET_ZK_ENABLED_KEY, config.getOrDefault(MM2_OFFSET_ZK_ENABLED_KEY, Boolean.FALSE.toString()));
 
             MirrorMaker mirrorMaker = new MirrorMaker(config, clusters);
 
