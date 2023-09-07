@@ -16,6 +16,8 @@
  */
 package org.apache.kafka.connect.mirror.rest;
 
+import java.util.ArrayList;
+
 import org.apache.kafka.connect.mirror.SourceAndTarget;
 import org.apache.kafka.connect.mirror.rest.resources.InternalMirrorResource;
 import org.apache.kafka.connect.runtime.Herder;
@@ -24,10 +26,14 @@ import org.apache.kafka.connect.runtime.rest.RestServer;
 import org.apache.kafka.connect.runtime.rest.RestServerConfig;
 import org.apache.kafka.connect.runtime.rest.resources.ConnectResource;
 
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
+
+import org.apache.kafka.connect.runtime.rest.resources.ConnectorPluginsResource;
+import org.apache.kafka.connect.runtime.rest.resources.ConnectorsResource;
+import org.apache.kafka.connect.runtime.rest.resources.InternalConnectResource;
+import org.apache.kafka.connect.runtime.rest.resources.RootResource;
 
 public class MirrorRestServer extends RestServer {
 
@@ -46,9 +52,23 @@ public class MirrorRestServer extends RestServer {
 
     @Override
     protected Collection<ConnectResource> regularResources() {
-        return Arrays.asList(
-                new InternalMirrorResource(herders, restClient)
-        );
+
+        Collection<ConnectResource> rs = new ArrayList<>();
+        rs.add(new InternalMirrorResource(herders, restClient));
+
+        // + connect 模式 Rest接口
+        boolean enabled = Boolean.parseBoolean(System.getProperty("dedicated.mode.enable.connect.rest", "false"));
+        if (enabled) {
+            herders.entrySet().stream().forEach(entry -> {
+                Herder herder = entry.getValue();
+                rs.add(new RootResource(herder));
+                rs.add(new ConnectorsResource(herder, config, restClient));
+                rs.add(new InternalConnectResource(herder, restClient));
+                rs.add(new ConnectorPluginsResource(herder));
+            });
+        }
+
+        return rs;
     }
 
     @Override
