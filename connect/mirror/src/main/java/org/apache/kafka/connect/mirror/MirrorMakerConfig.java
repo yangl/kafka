@@ -43,6 +43,7 @@ import java.util.Collections;
 import java.util.stream.Collectors;
 
 import static org.apache.kafka.common.config.ConfigDef.CaseInsensitiveValidString.in;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_CONSUMER_GROUP_ID_KEY;
 
 /** Top-level config describing replication flows between multiple Kafka clusters.
  *  <p>
@@ -193,7 +194,6 @@ public class MirrorMakerConfig extends AbstractConfig {
         props.putAll(stringsWithPrefix("task"));
         props.putAll(stringsWithPrefix("worker"));
         props.putAll(stringsWithPrefix("replication.policy"));
-        props.putAll(stringsWithPrefix("group.id"));
 
         // transform any expression like ${provider:path:key}, since the worker doesn't do so
         props = transform(props);
@@ -201,7 +201,8 @@ public class MirrorMakerConfig extends AbstractConfig {
 
         // fill in reasonable defaults
         props.putIfAbsent(CommonClientConfigs.CLIENT_ID_CONFIG, sourceAndTarget.toString());
-        props.putIfAbsent(GROUP_ID_CONFIG, sourceAndTarget.source() + "-mm2");
+        // props.putIfAbsent(GROUP_ID_CONFIG, sourceAndTarget.source() + "-mm2");
+        props.putIfAbsent(GROUP_ID_CONFIG, System.getProperty(MM2_CONSUMER_GROUP_ID_KEY));
         props.putIfAbsent(DistributedConfig.OFFSET_STORAGE_TOPIC_CONFIG, "mm2-offsets."
                 + sourceAndTarget.source() + ".internal");
         props.putIfAbsent(DistributedConfig.STATUS_STORAGE_TOPIC_CONFIG, "mm2-status."

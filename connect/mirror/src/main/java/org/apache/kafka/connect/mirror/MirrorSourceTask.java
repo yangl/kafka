@@ -169,7 +169,12 @@ public class MirrorSourceTask extends SourceTask {
         log.info("Starting with {} previously uncommitted partitions.", topicPartitionOffsets.entrySet().stream()
             .filter(x -> x.getValue() == 0L).count());
         log.trace("Seeking offsets: {}", topicPartitionOffsets);
-        topicPartitionOffsets.forEach(consumer::seek);
+        // topicPartitionOffsets.forEach(consumer::seek);
+        topicPartitionOffsets.forEach((tp, offset) -> {
+            if (offset != null && offset > 0L) {
+                consumer.seek(tp, offset);
+            }
+        });
         log.info("{} replicating {} topic-partitions {}->{}: {}.", Thread.currentThread().getName(),
             taskTopicPartitions.size(), sourceClusterAlias, config.targetClusterAlias(), taskTopicPartitions);
 
