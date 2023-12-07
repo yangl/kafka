@@ -169,8 +169,7 @@ public class MirrorCheckpointTask extends SourceTask {
                     "refreshing idle consumers group offsets at target cluster");
             scheduler.scheduleRepeatingDelayed(this::syncGroupOffset, config.syncGroupOffsetsInterval(),
                     "sync idle consumer group offset from source to target");
-
-            scheduler.scheduleRepeatingDelayed(this::syncZkOffset, config.syncGroupOffsetsInterval(),
+            scheduler.scheduleRepeatingDelayed(this::syncZkOffset, config.syncZkGroupOffsetsInterval(),
                     "同步ZK业务消费组位点至下游任务");
         }, "starting offset sync store");
         log.info("{} checkpointing {} consumer groups {}->{}: {}.", Thread.currentThread().getName(),
@@ -367,6 +366,7 @@ public class MirrorCheckpointTask extends SourceTask {
     }
 
     Map<String, Map<TopicPartition, OffsetAndMetadata>> syncGroupOffset() {
+        LASTEST_SYNC_GROUPOFFSETS_TOPIC = System.currentTimeMillis();
         Map<String, Map<TopicPartition, OffsetAndMetadata>> offsetToSyncAll = new HashMap<>();
 
         // first, sync offsets for the idle consumers at target
@@ -513,6 +513,8 @@ public class MirrorCheckpointTask extends SourceTask {
         if (!syncZkOffsetEnabled) {
             return;
         }
+
+        LASTEST_SYNC_GROUPOFFSETS_ZK = System.currentTimeMillis();
         if (latch.hasLeadership()) {
             ZkOffsetUtils.syncZkOffsets(sourceZkClient, targetZkClient, offsetSyncStore);
             if (jstormSourceZkClient != null && jstormTargetZkClient != null) {

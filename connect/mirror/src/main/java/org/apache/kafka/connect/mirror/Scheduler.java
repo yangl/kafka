@@ -68,7 +68,7 @@ class Scheduler implements AutoCloseable {
         } catch (Throwable e) {
             LOG.error("{} caught exception in task: {}", name, description, e);
         }
-    } 
+    }
 
     public void close() {
         closed = true;
@@ -76,9 +76,18 @@ class Scheduler implements AutoCloseable {
         try {
             boolean terminated = executor.awaitTermination(timeout.toMillis(), TimeUnit.MILLISECONDS);
             if (!terminated) {
-                LOG.error("{} timed out during shutdown of internal scheduler.", name);
+                executor.shutdownNow();
+                // Wait a while for tasks to respond to being cancelled
+                terminated = executor.awaitTermination(timeout.toMillis(), TimeUnit.MILLISECONDS);
+                if (!terminated) {
+                    LOG.error("{} timed out during shutdown of internal scheduler.", name);
+                }
             }
         } catch (InterruptedException e) {
+            // (Re-)Cancel if current thread also interrupted
+            executor.shutdownNow();
+            // Preserve interrupt status
+            Thread.currentThread().interrupt();
             LOG.warn("{} was interrupted during shutdown of internal scheduler.", name);
         }
     }

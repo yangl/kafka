@@ -23,6 +23,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_OFFSET_ZK_ENABLED_KEY;
+
 public class MirrorCheckpointConfig extends MirrorConnectorConfig {
 
     protected static final String REFRESH_GROUPS = "refresh.groups";
@@ -120,6 +122,17 @@ public class MirrorCheckpointConfig extends MirrorConnectorConfig {
 
     Duration syncGroupOffsetsInterval() {
         if (getBoolean(SYNC_GROUP_OFFSETS_ENABLED)) {
+            return Duration.ofSeconds(getLong(SYNC_GROUP_OFFSETS_INTERVAL_SECONDS));
+        } else {
+            // negative interval to disable
+            return Duration.ofMillis(-1);
+        }
+    }
+
+    // zk 消费组位点同步时间间隔，同topic时间，但开关不同
+    Duration syncZkGroupOffsetsInterval() {
+        boolean syncZkOffsetEnabled = Boolean.parseBoolean(System.getProperty(MM2_OFFSET_ZK_ENABLED_KEY, "false"));
+        if (syncZkOffsetEnabled) {
             return Duration.ofSeconds(getLong(SYNC_GROUP_OFFSETS_INTERVAL_SECONDS));
         } else {
             // negative interval to disable

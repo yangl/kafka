@@ -1,10 +1,10 @@
 package org.apache.kafka.connect.mirror;
 
-import static org.apache.kafka.connect.mirror.MirrorMakerConfig.SOURCE_CLUSTER_PREFIX;
-import static org.apache.kafka.connect.mirror.MirrorMakerConfig.TARGET_CLUSTER_PREFIX;
-
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+
+import static org.apache.kafka.connect.mirror.MirrorMakerConfig.SOURCE_CLUSTER_PREFIX;
+import static org.apache.kafka.connect.mirror.MirrorMakerConfig.TARGET_CLUSTER_PREFIX;
 
 /**
  * @author YANGLiiN
@@ -30,6 +30,10 @@ public class SFMirrorMakerConstants {
 
     public static final String PROVENANCE_HEADER_ENABLED_KEY = "provenance.header.enabled";
     public static final String REPLICATOR_ID_KEY = "__SF_REPLICATOR_ID";
+
+    // consuer group offsets 最后一次同步时间
+    public static Long LASTEST_SYNC_GROUPOFFSETS_ZK = Long.valueOf(0L);
+    public static Long LASTEST_SYNC_GROUPOFFSETS_TOPIC = Long.valueOf(0L);
 
 
     // 获取mm2消费组路径

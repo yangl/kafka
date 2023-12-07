@@ -20,6 +20,7 @@ import java.util.ArrayList;
 
 import org.apache.kafka.connect.mirror.SourceAndTarget;
 import org.apache.kafka.connect.mirror.rest.resources.InternalMirrorResource;
+import org.apache.kafka.connect.mirror.rest.resources.SFMirrorMakerResource;
 import org.apache.kafka.connect.runtime.Herder;
 import org.apache.kafka.connect.runtime.rest.RestClient;
 import org.apache.kafka.connect.runtime.rest.RestServer;
@@ -55,18 +56,16 @@ public class MirrorRestServer extends RestServer {
 
         Collection<ConnectResource> rs = new ArrayList<>();
         rs.add(new InternalMirrorResource(herders, restClient));
+        rs.add(new SFMirrorMakerResource());
 
         // + connect 模式 Rest接口
-        boolean enabled = Boolean.parseBoolean(System.getProperty("dedicated.mode.enable.connect.rest", "false"));
-        if (enabled) {
-            herders.entrySet().stream().forEach(entry -> {
-                Herder herder = entry.getValue();
-                rs.add(new RootResource(herder));
-                rs.add(new ConnectorsResource(herder, config, restClient));
-                rs.add(new InternalConnectResource(herder, restClient));
-                rs.add(new ConnectorPluginsResource(herder));
-            });
-        }
+        herders.entrySet().stream().forEach(entry -> {
+            Herder herder = entry.getValue();
+            rs.add(new RootResource(herder));
+            rs.add(new ConnectorsResource(herder, config, restClient));
+            rs.add(new InternalConnectResource(herder, restClient));
+            rs.add(new ConnectorPluginsResource(herder));
+        });
 
         return rs;
     }
