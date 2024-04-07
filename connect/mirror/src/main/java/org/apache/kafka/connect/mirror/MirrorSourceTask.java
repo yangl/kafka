@@ -60,7 +60,9 @@ import java.util.stream.Collectors;
 import static org.apache.kafka.connect.mirror.MirrorSourceConfig.OFFSET_SYNCS_SOURCE_ADMIN_ROLE;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.*;
 
-/** Replicates a set of topic-partitions. */
+/**
+ * Replicates a set of topic-partitions.
+ */
 public class MirrorSourceTask extends SourceTask {
 
     private static final Logger log = LoggerFactory.getLogger(MirrorSourceTask.class);
@@ -97,6 +99,9 @@ public class MirrorSourceTask extends SourceTask {
     // 循环同步消息头检测开关
     private boolean provenanceHeaderEnabled = false;
 
+    // 分区一致性保证（上下游主题分区同步后一致）
+    private boolean partitionConsistencyEnabled = true;
+
     // 消费组clientId
     private static Method getClientIdMethod;
 
@@ -109,7 +114,8 @@ public class MirrorSourceTask extends SourceTask {
         getClientIdMethod.setAccessible(true);
     }
 
-    public MirrorSourceTask() {}
+    public MirrorSourceTask() {
+    }
 
     // for testing
     MirrorSourceTask(KafkaConsumer<byte[], byte[]> consumer, MirrorSourceMetrics metrics, String sourceClusterAlias,
@@ -132,6 +138,8 @@ public class MirrorSourceTask extends SourceTask {
     public void start(Map<String, String> props) {
         sfMm2ConsumerGroupId = System.getProperty(MM2_CONSUMER_GROUP_ID_KEY);
         provenanceHeaderEnabled = Boolean.parseBoolean(System.getProperty(PROVENANCE_HEADER_ENABLED_KEY, Boolean.FALSE.toString()));
+        partitionConsistencyEnabled = Boolean.parseBoolean(System.getProperty(PARTITION_CONSISTENCY_ENABLED_KEY, Boolean.TRUE.toString()));
+
         String sourceClusterZkServers = props.get(SOURCE_CLUSTER_ZOOKEEPER_SERVERS);
         String targetClusterZkServers = props.get(TARGET_CLUSTER_ZOOKEEPER_SERVERS);
 
@@ -203,7 +211,7 @@ public class MirrorSourceTask extends SourceTask {
         });
 
         // 保存消费组offset至 __consumer_offsets
-        if (!offsets.isEmpty()){
+        if (!offsets.isEmpty()) {
             sourceClusterAdminClient.alterConsumerGroupOffsets(sfMm2ConsumerGroupId, offsets);
         }
 
@@ -217,7 +225,7 @@ public class MirrorSourceTask extends SourceTask {
         try {
             consumerAccess.acquire();
         } catch (InterruptedException e) {
-            log.warn("Interrupted waiting for access to consumer. Will try closing anyway."); 
+            log.warn("Interrupted waiting for access to consumer. Will try closing anyway.");
         }
         Utils.closeQuietly(consumer, "source consumer");
         Utils.closeQuietly(offsetProducer, "offset producer");
@@ -225,7 +233,7 @@ public class MirrorSourceTask extends SourceTask {
         Utils.closeQuietly(sourceZkClient, "source zk client");
         log.info("Stopping {} took {} ms.", Thread.currentThread().getName(), System.currentTimeMillis() - start);
     }
-   
+
     @Override
     public String version() {
         return new MirrorSourceConnector().version();
@@ -266,7 +274,7 @@ public class MirrorSourceTask extends SourceTask {
                         }
                         if (needAddReplicatorHeader) {
                             record.headers()
-                                    .add(REPLICATOR_ID_KEY, sourceClusterAlias.getBytes(StandardCharsets.UTF_8));
+                                .add(REPLICATOR_ID_KEY, sourceClusterAlias.getBytes(StandardCharsets.UTF_8));
                         }
                     }
                 }
@@ -292,7 +300,7 @@ public class MirrorSourceTask extends SourceTask {
         } catch (KafkaException e) {
             log.warn("Failure during poll.", e);
             return null;
-        } catch (Throwable e)  {
+        } catch (Throwable e) {
             log.error("Failure during poll.", e);
             // allow Connect to deal with the exception
             throw e;
@@ -300,7 +308,7 @@ public class MirrorSourceTask extends SourceTask {
             consumerAccess.release();
         }
     }
- 
+
     @Override
     public void commitRecord(SourceRecord record, RecordMetadata metadata) {
         if (stopping) {
@@ -368,7 +376,7 @@ public class MirrorSourceTask extends SourceTask {
     // sends OffsetSync record to internal offsets topic
     private void sendOffsetSync(OffsetSync offsetSync) {
         ProducerRecord<byte[], byte[]> record = new ProducerRecord<>(offsetSyncsTopic, 0,
-                offsetSync.recordKey(), offsetSync.recordValue());
+            offsetSync.recordKey(), offsetSync.recordValue());
         offsetProducer.send(record, (x, e) -> {
             if (e != null) {
                 log.error("Failure sending offset sync.", e);
@@ -379,7 +387,7 @@ public class MirrorSourceTask extends SourceTask {
             outstandingOffsetSyncs.release();
         });
     }
- 
+
     private Map<TopicPartition, Long> loadOffsets(Set<TopicPartition> topicPartitions) {
         return topicPartitions.stream().collect(Collectors.toMap(x -> x, this::loadOffset));
     }
@@ -394,10 +402,10 @@ public class MirrorSourceTask extends SourceTask {
     private Map<TopicPartition, Long> loadOffsetsFromTopic(Set<TopicPartition> topicPartitions) {
         Map<TopicPartition, Long> rs = Maps.newHashMap();
         Map<String, ListConsumerGroupOffsetsSpec> groupSpecs = Collections.singletonMap(sfMm2ConsumerGroupId,
-                new ListConsumerGroupOffsetsSpec().topicPartitions(topicPartitions));
+            new ListConsumerGroupOffsetsSpec().topicPartitions(topicPartitions));
 
         KafkaFuture<Map<TopicPartition, OffsetAndMetadata>> future = sourceClusterAdminClient
-                .listConsumerGroupOffsets(groupSpecs).partitionsToOffsetAndMetadata(sfMm2ConsumerGroupId);
+            .listConsumerGroupOffsets(groupSpecs).partitionsToOffsetAndMetadata(sfMm2ConsumerGroupId);
 
         try {
             future.get().forEach((topicPartition, offsetAndMetadata) -> rs.put(topicPartition, offsetAndMetadata != null ? offsetAndMetadata.offset() : 0L));
@@ -416,7 +424,7 @@ public class MirrorSourceTask extends SourceTask {
             String clientId = getIp() + "-" + getClientIdMethod.invoke(consumer);
 
             sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
-                    .forPath(consumerIdPath + "/" + clientId, clientId.getBytes(StandardCharsets.UTF_8));
+                .forPath(consumerIdPath + "/" + clientId, clientId.getBytes(StandardCharsets.UTF_8));
         } catch (KeeperException.NodeExistsException e) {
             // ignore
         } catch (Exception e) {
@@ -439,7 +447,7 @@ public class MirrorSourceTask extends SourceTask {
                 List<String> consumerIds = targetZkClient.getChildren().forPath(consumerIdPath);
                 if (consumerIds != null && consumerIds.size() > 0) {
                     String msg = String.format("循环同步了！请确认下游集群[%s]同步消费组[%s]是否还在运行中？", targetClusterZkServers,
-                            groupId);
+                        groupId);
                     System.err.println(msg);
                     Exit.exit(4);
                 }
@@ -447,7 +455,7 @@ public class MirrorSourceTask extends SourceTask {
         } catch (Exception e) {
             log.error("循环同步探测报错", e);
             Exit.exit(5);
-        }finally {
+        } finally {
             targetZkClient.close();
         }
 
@@ -458,13 +466,17 @@ public class MirrorSourceTask extends SourceTask {
     SourceRecord convertRecord(ConsumerRecord<byte[], byte[]> record) {
         String targetTopic = formatRemoteTopic(record.topic());
         Headers headers = convertHeaders(record);
+        Integer targetPartition = null;
+        if (partitionConsistencyEnabled) {
+            targetPartition = record.partition();
+        }
         return new SourceRecord(
-                MirrorUtils.wrapPartition(new TopicPartition(record.topic(), record.partition()), sourceClusterAlias),
-                MirrorUtils.wrapOffset(record.offset()),
-                targetTopic, record.partition(),
-                Schema.OPTIONAL_BYTES_SCHEMA, record.key(),
-                Schema.BYTES_SCHEMA, record.value(),
-                record.timestamp(), headers);
+            MirrorUtils.wrapPartition(new TopicPartition(record.topic(), record.partition()), sourceClusterAlias),
+            MirrorUtils.wrapOffset(record.offset()),
+            targetTopic, targetPartition,
+            Schema.OPTIONAL_BYTES_SCHEMA, record.key(),
+            Schema.BYTES_SCHEMA, record.value(),
+            record.timestamp(), headers);
     }
 
     private Headers convertHeaders(ConsumerRecord<byte[], byte[]> record) {

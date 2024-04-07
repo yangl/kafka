@@ -28,8 +28,12 @@ public class SFMirrorMakerConstants {
 
     public static final String MM2_OFFSET_ZK_ENABLED_KEY = "sync.group.offsets.zk.enabled";
 
+    // 消息级循环同步检测开关，默认false
     public static final String PROVENANCE_HEADER_ENABLED_KEY = "provenance.header.enabled";
     public static final String REPLICATOR_ID_KEY = "__SF_REPLICATOR_ID";
+
+    // 分区一致性保证，默认true
+    public static final String PARTITION_CONSISTENCY_ENABLED_KEY = "partition.consistency.enabled";
 
     // consuer group offsets 最后一次同步时间
     public static Long LASTEST_SYNC_GROUPOFFSETS_ZK = Long.valueOf(0L);
