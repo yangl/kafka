@@ -100,9 +100,6 @@ public class MirrorSourceTask extends SourceTask {
     // 循环同步消息头检测开关
     private boolean provenanceHeaderEnabled = false;
 
-    // 分区一致性保证（上下游主题分区同步后一致）
-    private boolean partitionConsistencyEnabled = true;
-
     // 消费组clientId
     private static Method getClientIdMethod;
 
@@ -139,7 +136,6 @@ public class MirrorSourceTask extends SourceTask {
     public void start(Map<String, String> props) {
         sfMm2ConsumerGroupId = System.getProperty(MM2_CONSUMER_GROUP_ID_KEY);
         provenanceHeaderEnabled = Boolean.parseBoolean(System.getProperty(PROVENANCE_HEADER_ENABLED_KEY, Boolean.FALSE.toString()));
-        partitionConsistencyEnabled = Boolean.parseBoolean(System.getProperty(PARTITION_CONSISTENCY_ENABLED_KEY, Boolean.TRUE.toString()));
 
         String sourceClusterZkServers = props.get(SOURCE_CLUSTER_ZOOKEEPER_SERVERS);
         String targetClusterZkServers = props.get(TARGET_CLUSTER_ZOOKEEPER_SERVERS);
@@ -482,10 +478,7 @@ public class MirrorSourceTask extends SourceTask {
     SourceRecord convertRecord(ConsumerRecord<byte[], byte[]> record) {
         String targetTopic = formatRemoteTopic(record.topic());
         Headers headers = convertHeaders(record);
-        Integer targetPartition = null;
-        if (partitionConsistencyEnabled) {
-            targetPartition = record.partition();
-        }
+        Integer targetPartition = record.partition();
         return new SourceRecord(
             MirrorUtils.wrapPartition(new TopicPartition(record.topic(), record.partition()), sourceClusterAlias),
             MirrorUtils.wrapOffset(record.offset()),
