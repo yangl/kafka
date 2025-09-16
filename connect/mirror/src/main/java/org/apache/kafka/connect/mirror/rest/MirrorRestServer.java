@@ -18,15 +18,18 @@ package org.apache.kafka.connect.mirror.rest;
 
 import org.apache.kafka.connect.mirror.SourceAndTarget;
 import org.apache.kafka.connect.mirror.rest.resources.InternalMirrorResource;
+import org.apache.kafka.connect.mirror.rest.resources.SFMirrorMakerResource;
 import org.apache.kafka.connect.runtime.Herder;
 import org.apache.kafka.connect.runtime.rest.RestClient;
 import org.apache.kafka.connect.runtime.rest.RestServer;
 import org.apache.kafka.connect.runtime.rest.RestServerConfig;
 
+import org.apache.kafka.connect.runtime.rest.resources.*;
 import org.glassfish.hk2.api.TypeLiteral;
 import org.glassfish.hk2.utilities.binding.AbstractBinder;
 import org.glassfish.jersey.server.ResourceConfig;
 
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
@@ -48,18 +51,28 @@ public class MirrorRestServer extends RestServer {
 
     @Override
     protected Collection<Class<?>> regularResources() {
-        return Collections.singletonList(
-                InternalMirrorResource.class
+
+        return Arrays.asList(
+            InternalMirrorResource.class,
+
+            RootResource.class,
+            ConnectorsResource.class,
+            InternalConnectResource.class,
+            ConnectorPluginsResource.class,
+            SFMirrorMakerResource.class
         );
     }
 
     @Override
     protected Collection<Class<?>> adminResources() {
-        return Collections.emptyList();
+        return Collections.singletonList(
+            LoggingResource.class
+        );
     }
 
     @Override
     protected void configureRegularResources(ResourceConfig resourceConfig) {
+        herders.values().forEach(herder -> registerRestExtensions(herder, resourceConfig));
         resourceConfig.register(new Binder());
     }
 
@@ -68,6 +81,9 @@ public class MirrorRestServer extends RestServer {
         protected void configure() {
             bind(herders).to(new TypeLiteral<Map<SourceAndTarget, Herder>>() { });
             bind(restClient).to(RestClient.class);
+
+            bind(config).to(RestServerConfig.class);
+            herders.values().forEach(herder -> bind(herder).to(Herder.class));
         }
     }
 
