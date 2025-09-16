@@ -95,6 +95,7 @@ versions += [
   commonsLang: "3.18.0",
   commonsValidator: "1.7",
   dropwizardMetrics: "4.1.12.1",
+  fastjson2: "2.0.58",
   gradle: "8.10.2",
   grgit: "4.1.1",
   httpclient: "4.5.14",
@@ -162,6 +163,7 @@ versions += [
   spotbugs: "4.8.6",
   zinc: "1.9.2",
   zookeeper: "3.8.4",
+  curator: "5.7.1",
   // When updating the zstd version, please do as well in docker/native/native-image-configs/resource-config.json
   // Also make sure the compression levels in org.apache.kafka.common.record.CompressionType are still valid
   zstd: "1.5.6-4",
@@ -187,6 +189,7 @@ libs += [
   commonsBeanutils: "commons-beanutils:commons-beanutils:$versions.commonsBeanutils",
   commonsLang: "org.apache.commons:commons-lang3:$versions.commonsLang",
   commonsValidator: "commons-validator:commons-validator:$versions.commonsValidator",
+  fastjson2: "com.alibaba.fastjson2:fastjson2:$versions.fastjson2",
   jacksonAnnotations: "com.fasterxml.jackson.core:jackson-annotations:$versions.jackson",
   jacksonDatabind: "com.fasterxml.jackson.core:jackson-databind:$versions.jackson",
   jacksonDataformatCsv: "com.fasterxml.jackson.dataformat:jackson-dataformat-csv:$versions.jackson",
@@ -264,6 +267,7 @@ libs += [
   swaggerAnnotations: "io.swagger.core.v3:swagger-annotations:$swaggerVersion",
   swaggerJaxrs2: "io.swagger.core.v3:swagger-jaxrs2:$swaggerVersion",
   zookeeper: "org.apache.zookeeper:zookeeper:$versions.zookeeper",
+  curator: "org.apache.curator:curator-recipes:$versions.curator",
   jfreechart: "jfreechart:jfreechart:$versions.jfreechart",
   mavenArtifact: "org.apache.maven:maven-artifact:$versions.mavenArtifact",
   zstd: "com.github.luben:zstd-jni:$versions.zstd",

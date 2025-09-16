@@ -90,8 +90,6 @@ public class DefaultTopicFilter implements TopicFilter {
 
     @Override
     public boolean shouldReplicateTopic(String topic) {
-        log.info("判断该主题是否要同步");
-
         boolean contains = true;
 
         boolean autoCreateTopicsEnabled = Boolean.parseBoolean(System.getProperty("MM2_AUTO_CREATE_TOPICS_ENABLE", "true"));

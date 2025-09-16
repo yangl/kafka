@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.connect.mirror;
 
+import com.google.common.base.Strings;
 import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
@@ -69,6 +70,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static org.apache.kafka.clients.CommonClientConfigs.CLIENT_ID_CONFIG;
+import static org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.*;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.PARTITION_CONSISTENCY_ENABLED_KEY;
 
 /**
  *  Entry point for "MirrorMaker 2.0".
@@ -326,7 +330,7 @@ public class MirrorMaker {
         parser.addArgument("config").type(Arguments.fileType().verifyCanRead())
             .metavar("mm2.properties").required(true)
             .help("MM2 configuration file.");
-        parser.addArgument("--clusters").nargs("+").metavar("CLUSTER").required(false)
+        parser.addArgument("--clusters").nargs("+").metavar("CLUSTER").required(true)
             .help("Target cluster to use for this node.");
         Namespace ns;
         try {
@@ -343,6 +347,32 @@ public class MirrorMaker {
 
             Properties props = Utils.loadProps(configFile.getPath());
             Map<String, String> config = Utils.propsToStringMap(props);
+
+            if (Strings.isNullOrEmpty(config.get(GROUP_ID_CONFIG))) {
+                log.error("mm2消费组id为必配项！");
+
+                Exit.exit(4);
+            }
+
+            // 设置消费组
+            System.setProperty(MM2_CONSUMER_GROUP_ID_KEY, config.get(GROUP_ID_CONFIG));
+
+            // 设置循环同步消息头检测
+            System.setProperty(PROVENANCE_HEADER_ENABLED_KEY, config.getOrDefault(PROVENANCE_HEADER_ENABLED_KEY, Boolean.FALSE.toString()));
+
+            // ZK offset 是否同步
+            System.setProperty(MM2_OFFSET_ZK_ENABLED_KEY, config.getOrDefault(MM2_OFFSET_ZK_ENABLED_KEY, Boolean.FALSE.toString()));
+
+            // 分区一致性保证 (发送到下游集群的数据)
+            System.setProperty(PARTITION_CONSISTENCY_ENABLED_KEY, config.getOrDefault(PARTITION_CONSISTENCY_ENABLED_KEY, Boolean.TRUE.toString()));
+
+            // 自动创建topic
+            System.setProperty(MM2_AUTO_CREATE_TOPICS_ENABLED_KEY, config.getOrDefault(MM2_AUTO_CREATE_TOPICS_ENABLED_KEY, Boolean.FALSE.toString()));
+
+            // 自动创建分区
+            System.setProperty(MM2_AUTO_CREATE_PARTITIONS_ENABLED_KEY, config.getOrDefault(MM2_AUTO_CREATE_PARTITIONS_ENABLED_KEY, Boolean.TRUE.toString()));
+
+
             MirrorMaker mirrorMaker = new MirrorMaker(config, clusters);
             
             try {

@@ -207,6 +207,9 @@ public abstract class AbstractWorkerSourceTask extends WorkerTask<SourceRecord, 
     protected boolean started = false;
     private volatile boolean producerClosed = false;
 
+    // 分区一致性保证（上下游主题分区同步后一致）
+    private boolean partitionConsistencyEnabled = true;
+
     protected AbstractWorkerSourceTask(ConnectorTaskId id,
                                        SourceTask task,
                                        TaskStatus.Listener statusListener,
@@ -252,6 +255,9 @@ public abstract class AbstractWorkerSourceTask extends WorkerTask<SourceRecord, 
         this.sourceTaskMetricsGroup = new SourceTaskMetricsGroup(id, connectMetrics);
         this.topicTrackingEnabled = workerConfig.getBoolean(TOPIC_TRACKING_ENABLE_CONFIG);
         this.topicCreation = TopicCreation.newTopicCreation(workerConfig, topicGroups);
+
+        this.partitionConsistencyEnabled = Boolean.parseBoolean(System.getProperty("partition.consistency.enabled", Boolean.TRUE.toString()));
+
     }
 
     @Override
@@ -495,7 +501,12 @@ public abstract class AbstractWorkerSourceTask extends WorkerTask<SourceRecord, 
             return null;
         }
 
-        return new ProducerRecord<>(record.topic(), record.kafkaPartition(),
+        Integer partition = null;
+        if (partitionConsistencyEnabled) {
+            partition = record.kafkaPartition();
+        }
+
+        return new ProducerRecord<>(record.topic(), partition,
                 ConnectUtils.checkAndConvertTimestamp(record.timestamp()), key, value, headers);
     }
 

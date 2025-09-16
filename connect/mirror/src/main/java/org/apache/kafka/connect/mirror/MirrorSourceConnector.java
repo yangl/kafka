@@ -16,23 +16,12 @@
  */
 package org.apache.kafka.connect.mirror;
 
-import org.apache.kafka.clients.admin.Admin;
-import org.apache.kafka.clients.admin.AlterConfigOp;
-import org.apache.kafka.clients.admin.Config;
-import org.apache.kafka.clients.admin.ConfigEntry;
-import org.apache.kafka.clients.admin.CreateTopicsOptions;
-import org.apache.kafka.clients.admin.NewPartitions;
-import org.apache.kafka.clients.admin.NewTopic;
-import org.apache.kafka.clients.admin.TopicDescription;
+import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.admin.*;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.acl.AccessControlEntry;
-import org.apache.kafka.common.acl.AccessControlEntryFilter;
-import org.apache.kafka.common.acl.AclBinding;
-import org.apache.kafka.common.acl.AclBindingFilter;
-import org.apache.kafka.common.acl.AclOperation;
-import org.apache.kafka.common.acl.AclPermissionType;
+import org.apache.kafka.common.acl.*;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.config.ConfigValue;
@@ -49,21 +38,11 @@ import org.apache.kafka.connect.connector.Task;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.ExactlyOnceSupport;
 import org.apache.kafka.connect.source.SourceConnector;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -75,9 +54,9 @@ import java.util.stream.Stream;
 import static org.apache.kafka.connect.mirror.MirrorConnectorConfig.OFFSET_SYNCS_CLIENT_ROLE_PREFIX;
 import static org.apache.kafka.connect.mirror.MirrorConnectorConfig.OFFSET_SYNCS_TOPIC_CONFIG_PREFIX;
 import static org.apache.kafka.connect.mirror.MirrorSourceConfig.SYNC_TOPIC_ACLS_ENABLED;
-import static org.apache.kafka.connect.mirror.MirrorUtils.SOURCE_CLUSTER_KEY;
-import static org.apache.kafka.connect.mirror.MirrorUtils.TOPIC_KEY;
-import static org.apache.kafka.connect.mirror.MirrorUtils.adminCall;
+import static org.apache.kafka.connect.mirror.MirrorUtils.*;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_AUTO_CREATE_PARTITIONS_ENABLED_KEY;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_AUTO_CREATE_TOPICS_ENABLED_KEY;
 
 /** Replicate data, configuration, and ACLs between clusters.
  *
@@ -524,6 +503,12 @@ public class MirrorSourceConnector extends SourceConnector {
 
     // visible for testing
     void createNewTopics(Map<String, NewTopic> newTopics) throws ExecutionException, InterruptedException {
+        boolean autoEnable = Boolean.parseBoolean(System.getProperty(MM2_AUTO_CREATE_TOPICS_ENABLED_KEY, "false"));
+        if (!autoEnable) {
+            log.info("MM2未开启自动创建主题功能, 新主题{}", newTopics.keySet());
+            return;
+        }
+
         adminCall(
                 () -> {
                     targetAdminClient.createTopics(newTopics.values(), new CreateTopicsOptions()).values()
@@ -541,6 +526,18 @@ public class MirrorSourceConnector extends SourceConnector {
     }
 
     void createNewPartitions(Map<String, NewPartitions> newPartitions) throws ExecutionException, InterruptedException {
+        boolean autoEnable = Boolean.parseBoolean(System.getProperty(MM2_AUTO_CREATE_PARTITIONS_ENABLED_KEY, "true"));
+        if (!autoEnable) {
+            log.warn("MM2未开启自动创建新分区功能");
+            return;
+        }
+
+        log.info("MM2创建新分区, @上游集群@: {} @上游连接串@: {} @下游集群@: {} @下游连接串@: {} @主题@: {}", config.sourceClusterAlias(),
+                config.originalsStrings().get(MirrorMakerConfig.SOURCE_CLUSTER_PREFIX + CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG),
+                config.targetClusterAlias(),
+                config.originalsStrings().get(MirrorMakerConfig.TARGET_CLUSTER_PREFIX + CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG),
+                newPartitions.keySet());
+
         adminCall(
                 () -> {
                     targetAdminClient.createPartitions(newPartitions).values().forEach((k, v) -> v.whenComplete((x, e) -> {
