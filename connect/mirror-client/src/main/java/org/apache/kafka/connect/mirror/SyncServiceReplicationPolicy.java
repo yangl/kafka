@@ -36,7 +36,6 @@ public class SyncServiceReplicationPolicy extends DefaultReplicationPolicy {
     @Override
     public void configure(Map<String, ?> props) {
         super.configure(props);
-
         if (props.containsKey(SOURCE_CLUSTER_ALIAS_CONFIG)) {
             sourceClusterAlias = (String) props.get(SOURCE_CLUSTER_ALIAS_CONFIG);
             log.info("Using source cluster alias `{}`.", sourceClusterAlias);
@@ -60,10 +59,10 @@ public class SyncServiceReplicationPolicy extends DefaultReplicationPolicy {
     }
 
     /**
-     * Unlike DefaultReplicationPolicy, IdentityReplicationPolicy does not include the source
+     * Unlike {@link DefaultReplicationPolicy}, IdentityReplicationPolicy does not include the source
      * cluster alias in the remote topic name. Instead, topic names are unchanged.
      * <p>
-     * In the special case of heartbeats, we defer to DefaultReplicationPolicy.
+     * In the special case of heartbeats, we defer to {@link DefaultReplicationPolicy#formatRemoteTopic(String, String)}.
      */
     @Override
     public String formatRemoteTopic(String sourceClusterAlias, String topic) {
@@ -73,16 +72,17 @@ public class SyncServiceReplicationPolicy extends DefaultReplicationPolicy {
             if (topicMapping.containsKey(topic)) {
                 return topicMapping.get(topic);
             }
+
             return topic;
         }
     }
 
     /**
-     * Unlike DefaultReplicationPolicy, IdentityReplicationPolicy cannot know the source of
-     * a remote topic based on its name alone. If `source.cluster.alias` is provided,
-     * `topicSource` will return that.
+     * Unlike {@link DefaultReplicationPolicy}, IdentityReplicationPolicy cannot know the source of
+     * a remote topic based on its name alone. If <code>source.cluster.alias</code> is provided,
+     * this method will return that.
      * <p>
-     * In the special case of heartbeats, we defer to DefaultReplicationPolicy.
+     * In the special case of heartbeats, we defer to {@link DefaultReplicationPolicy#topicSource(String)}.
      */
     @Override
     public String topicSource(String topic) {
@@ -94,9 +94,9 @@ public class SyncServiceReplicationPolicy extends DefaultReplicationPolicy {
     }
 
     /**
-     * Since any topic may be a "remote topic", this just returns `topic`.
+     * Since any topic may be a remote topic, this just returns `topic`.
      * <p>
-     * In the special case of heartbeats, we defer to DefaultReplicationPolicy.
+     * In the special case of heartbeats, we defer to {@link DefaultReplicationPolicy#upstreamTopic(String)}.
      */
     @Override
     public String upstreamTopic(String topic) {

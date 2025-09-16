@@ -28,12 +28,10 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
-import org.apache.kafka.clients.consumer.internals.ClassicKafkaConsumer;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.utils.Exit;
@@ -53,7 +51,11 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
@@ -81,7 +83,7 @@ public class MirrorSourceTask extends SourceTask {
     private Set<TopicPartition> taskTopicPartitions;
 
     // 上游集群消费组zk客户端
-    private final RetryPolicy ZK_RETRY_POLICY = new BoundedExponentialBackoffRetry(100, 10000, 10);
+    private final RetryPolicy zkRetryPolicy = new BoundedExponentialBackoffRetry(100, 10000, 10);
     private CuratorFramework sourceZkClient;
 
     // 上游集群AdminClient
@@ -135,7 +137,7 @@ public class MirrorSourceTask extends SourceTask {
         checkBidirectionSync(targetClusterZkServers, sfMm2ConsumerGroupId);
 
         // 初始化 sourceZkClient
-        sourceZkClient = CuratorFrameworkFactory.newClient(sourceClusterZkServers, ZK_RETRY_POLICY);
+        sourceZkClient = CuratorFrameworkFactory.newClient(sourceClusterZkServers, zkRetryPolicy);
         sourceZkClient.start();
 
         MirrorSourceTaskConfig config = new MirrorSourceTaskConfig(props);
@@ -182,7 +184,7 @@ public class MirrorSourceTask extends SourceTask {
             // 保存消费组offset至zk，兼容现有zk消费组offset同步机制
             taskTopicPartitions.forEach(topicPartition -> {
                 Long upstreamOffset = loadOffset(topicPartition);
-                if (upstreamOffset != null && upstreamOffset.longValue() >= 0) {
+                if (upstreamOffset != null && upstreamOffset >= 0) {
                     offsets.put(topicPartition, new OffsetAndMetadata(upstreamOffset + 1));
                 }
 
@@ -256,7 +258,7 @@ public class MirrorSourceTask extends SourceTask {
                         }
                         if (needAddReplicatorHeader) {
                             record.headers()
-                                    .add(REPLICATOR_ID_KEY, sourceClusterAlias.getBytes(StandardCharsets.UTF_8));
+                                .add(REPLICATOR_ID_KEY, sourceClusterAlias.getBytes(StandardCharsets.UTF_8));
                         }
                     }
                 }
@@ -353,12 +355,18 @@ public class MirrorSourceTask extends SourceTask {
     // 启动的时候从__consumer_offsets获取offset，便于复用现有工具链
     private Map<TopicPartition, Long> loadOffsetsFromTopic(Set<TopicPartition> topicPartitions) {
         Map<TopicPartition, Long> rs = Maps.newHashMap();
-        Map<String, ListConsumerGroupOffsetsSpec> groupSpecs = Collections.singletonMap(sfMm2ConsumerGroupId, new ListConsumerGroupOffsetsSpec().topicPartitions(topicPartitions));
+        Map<String, ListConsumerGroupOffsetsSpec> groupSpecs = Collections.singletonMap(sfMm2ConsumerGroupId,
+            new ListConsumerGroupOffsetsSpec()
+                .topicPartitions(topicPartitions));
 
-        KafkaFuture<Map<TopicPartition, OffsetAndMetadata>> future = sourceClusterAdminClient.listConsumerGroupOffsets(groupSpecs).partitionsToOffsetAndMetadata(sfMm2ConsumerGroupId);
+        KafkaFuture<Map<TopicPartition, OffsetAndMetadata>> future = sourceClusterAdminClient
+            .listConsumerGroupOffsets(groupSpecs)
+            .partitionsToOffsetAndMetadata(sfMm2ConsumerGroupId);
 
         try {
-            future.get().forEach((topicPartition, offsetAndMetadata) -> rs.put(topicPartition, offsetAndMetadata != null ? offsetAndMetadata.offset() - 1L : -1L));
+            future.get().forEach((topicPartition, offsetAndMetadata) ->
+                rs.put(topicPartition, offsetAndMetadata != null ? offsetAndMetadata.offset() - 1L : -1L));
+
         } catch (InterruptedException | ExecutionException e) {
             log.warn("启动时获取offset报错", e);
         }
@@ -374,7 +382,7 @@ public class MirrorSourceTask extends SourceTask {
             String clientId = getIp() + "-" + getClientIdMethod.invoke(consumer);
 
             sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
-                    .forPath(consumerIdPath + "/" + clientId, clientId.getBytes(StandardCharsets.UTF_8));
+                .forPath(consumerIdPath + "/" + clientId, clientId.getBytes(StandardCharsets.UTF_8));
         } catch (KeeperException.NodeExistsException e) {
             // ignore
         } catch (Exception e) {

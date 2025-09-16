@@ -506,7 +506,7 @@ public class MirrorCheckpointTask extends SourceTask {
             Stat stat = targetZkClient.checkExists().forPath(MM2_OFFSETS_IDS_PATH_FORMAT);
             if (stat != null) {
                 List<String> ids = targetZkClient.getChildren().forPath(MM2_OFFSETS_IDS_PATH_FORMAT);
-                if (ids != null && ids.size() > 0) {
+                if (ids != null && !ids.isEmpty()) {
                     System.err.println("offsets循环同步了！请确认下游集群ZKOFFSETS同步消费组是否还在运行中？");
                     Exit.exit(14);
                 }
@@ -529,14 +529,17 @@ public class MirrorCheckpointTask extends SourceTask {
             if (jstormSourceZkClient != null && jstormTargetZkClient != null) {
                 ZkOffsetUtils.syncJstormOffsets(jstormSourceZkClient, jstormTargetZkClient, offsetSyncStore);
             }
+
+            log.info("同步zk offset至下游集群成功");
+
         } else {
             String leaderId = null;
             try {
                 leaderId = latch.getLeader().getId();
             } catch (Exception e) {
-                throw new RuntimeException(e);
+                // ignore
             }
-            log.info("当前task不是leader，不执行zk offset同步，leader -> {}", leaderId);
+            log.info("当前task不是leader, 不执行zk offset同步, 当前leader -> {}", leaderId);
         }
 
     }
