@@ -18,26 +18,21 @@ package org.apache.kafka.connect.mirror;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.*;
+import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.acl.*;
-import org.apache.kafka.common.config.ConfigDef;
-import org.apache.kafka.common.config.ConfigResource;
-import org.apache.kafka.common.config.ConfigValue;
-import org.apache.kafka.common.errors.InvalidPartitionsException;
-import org.apache.kafka.common.errors.SecurityDisabledException;
-import org.apache.kafka.common.errors.UnsupportedVersionException;
-import org.apache.kafka.common.resource.PatternType;
-import org.apache.kafka.common.resource.ResourcePattern;
-import org.apache.kafka.common.resource.ResourcePatternFilter;
-import org.apache.kafka.common.resource.ResourceType;
+import org.apache.kafka.common.config.*;
+import org.apache.kafka.common.errors.*;
+import org.apache.kafka.common.resource.*;
 import org.apache.kafka.common.utils.AppInfoParser;
 import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.connect.connector.Task;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.ExactlyOnceSupport;
 import org.apache.kafka.connect.source.SourceConnector;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,14 +42,14 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-import java.util.stream.Stream;
+import java.util.stream.*;
 
 import static org.apache.kafka.connect.mirror.MirrorConnectorConfig.OFFSET_SYNCS_CLIENT_ROLE_PREFIX;
 import static org.apache.kafka.connect.mirror.MirrorConnectorConfig.OFFSET_SYNCS_TOPIC_CONFIG_PREFIX;
 import static org.apache.kafka.connect.mirror.MirrorSourceConfig.SYNC_TOPIC_ACLS_ENABLED;
-import static org.apache.kafka.connect.mirror.MirrorUtils.*;
+import static org.apache.kafka.connect.mirror.MirrorUtils.SOURCE_CLUSTER_KEY;
+import static org.apache.kafka.connect.mirror.MirrorUtils.TOPIC_KEY;
+import static org.apache.kafka.connect.mirror.MirrorUtils.adminCall;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_AUTO_CREATE_PARTITIONS_ENABLED_KEY;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_AUTO_CREATE_TOPICS_ENABLED_KEY;
 

@@ -16,19 +16,11 @@
  */
 package org.apache.kafka.connect.mirror;
 
-import org.apache.commons.lang3.StringUtils;
-import org.apache.curator.RetryPolicy;
-import org.apache.curator.framework.CuratorFramework;
-import org.apache.curator.framework.CuratorFrameworkFactory;
-import org.apache.curator.framework.recipes.leader.LeaderLatch;
-import org.apache.curator.retry.BoundedExponentialBackoffRetry;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.RecordMetadata;
-import org.apache.kafka.common.ConsumerGroupState;
-import org.apache.kafka.common.KafkaFuture;
-import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.*;
 import org.apache.kafka.common.errors.UnknownMemberIdException;
 import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.Utils;
@@ -36,6 +28,12 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
 
+import org.apache.commons.lang3.StringUtils;
+import org.apache.curator.RetryPolicy;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.leader.LeaderLatch;
+import org.apache.curator.retry.BoundedExponentialBackoffRetry;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.data.Stat;
@@ -53,7 +51,6 @@ import java.util.stream.Stream;
 
 import static org.apache.kafka.connect.mirror.MirrorUtils.adminCall;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.*;
-import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_OFFSET_ZK_ENABLED_KEY;
 import static org.apache.kafka.connect.mirror.ZkOffsetUtils.JSTORM_NAMESPACE;
 
 /** Emits checkpoints for upstream consumer groups. */
@@ -79,7 +76,7 @@ public class MirrorCheckpointTask extends SourceTask {
     private CheckpointStore checkpointStore;
 
 
-    private final RetryPolicy ZK_RETRY_POLICY = new BoundedExponentialBackoffRetry(100, 10000, 10);
+    private final RetryPolicy zkRetryPolicy = new BoundedExponentialBackoffRetry(100, 10000, 10);
 
     // 上游集群消费组zk客户端
     private CuratorFramework sourceZkClient;
@@ -128,30 +125,30 @@ public class MirrorCheckpointTask extends SourceTask {
         targetAdminClient = config.forwardingAdmin(config.targetAdminConfig("checkpoint-target-admin"));
 
         String szk = props.get(SOURCE_CLUSTER_ZOOKEEPER_SERVERS);
-        sourceZkClient = CuratorFrameworkFactory.newClient(szk, ZK_RETRY_POLICY);
+        sourceZkClient = CuratorFrameworkFactory.newClient(szk, zkRetryPolicy);
         sourceZkClient.start();
 
         String tzk = props.get(TARGET_CLUSTER_ZOOKEEPER_SERVERS);
-        targetZkClient = CuratorFrameworkFactory.newClient(tzk, ZK_RETRY_POLICY);
+        targetZkClient = CuratorFrameworkFactory.newClient(tzk, zkRetryPolicy);
         targetZkClient.start();
 
         // JStorm 消费组位点
         String sJstorm = StringUtils.substringBefore(szk, "/");
-        CuratorFramework sJstormZk = CuratorFrameworkFactory.newClient(sJstorm, ZK_RETRY_POLICY);
+        CuratorFramework sJstormZk = CuratorFrameworkFactory.newClient(sJstorm, zkRetryPolicy);
         sJstormZk.start();
         if (ZkOffsetUtils.exists(sJstormZk, JSTORM_NAMESPACE)) {
-            jstormSourceZkClient = CuratorFrameworkFactory.newClient(sJstorm + JSTORM_NAMESPACE, ZK_RETRY_POLICY);
+            jstormSourceZkClient = CuratorFrameworkFactory.newClient(sJstorm + JSTORM_NAMESPACE, zkRetryPolicy);
             jstormSourceZkClient.start();
 
             String tJstorm = StringUtils.substringBefore(tzk, "/");
-            CuratorFramework tJstormZk = CuratorFrameworkFactory.newClient(tJstorm, ZK_RETRY_POLICY);
+            CuratorFramework tJstormZk = CuratorFrameworkFactory.newClient(tJstorm, zkRetryPolicy);
             tJstormZk.start();
             if (!ZkOffsetUtils.exists(tJstormZk, JSTORM_NAMESPACE)) {
                 ZkOffsetUtils.create(tJstormZk, JSTORM_NAMESPACE);
             }
             tJstormZk.close();
 
-            jstormTargetZkClient = CuratorFrameworkFactory.newClient(tJstorm + JSTORM_NAMESPACE, ZK_RETRY_POLICY);
+            jstormTargetZkClient = CuratorFrameworkFactory.newClient(tJstorm + JSTORM_NAMESPACE, zkRetryPolicy);
             jstormTargetZkClient.start();
 
         }

@@ -16,22 +16,11 @@
  */
 package org.apache.kafka.connect.mirror;
 
-import com.google.common.base.Strings;
-import com.google.common.collect.Maps;
-import org.apache.curator.RetryPolicy;
-import org.apache.curator.framework.CuratorFramework;
-import org.apache.curator.framework.CuratorFrameworkFactory;
-import org.apache.curator.retry.BoundedExponentialBackoffRetry;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsSpec;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.clients.producer.RecordMetadata;
-import org.apache.kafka.common.KafkaException;
-import org.apache.kafka.common.KafkaFuture;
-import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.*;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.utils.Exit;
@@ -42,6 +31,13 @@ import org.apache.kafka.connect.header.Headers;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
 
+import com.google.common.base.Strings;
+import com.google.common.collect.Maps;
+
+import org.apache.curator.RetryPolicy;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.retry.BoundedExponentialBackoffRetry;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.data.Stat;
@@ -51,18 +47,13 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
 
 import static org.apache.kafka.connect.mirror.MirrorSourceConfig.OFFSET_SYNCS_SOURCE_ADMIN_ROLE;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.*;
-import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.TARGET_CLUSTER_ZOOKEEPER_SERVERS;
 
 /** Replicates a set of topic-partitions. */
 public class MirrorSourceTask extends SourceTask {
@@ -403,7 +394,7 @@ public class MirrorSourceTask extends SourceTask {
             Stat stat = targetZkClient.checkExists().forPath(consumerIdPath);
             if (stat != null) {
                 List<String> consumerIds = targetZkClient.getChildren().forPath(consumerIdPath);
-                if (consumerIds != null && consumerIds.size() > 0) {
+                if (consumerIds != null && !consumerIds.isEmpty()) {
                     String msg = String.format("循环同步了！请确认下游集群[%s]同步消费组[%s]是否还在运行中？", targetClusterZkServers,
                             groupId);
                     System.err.println(msg);

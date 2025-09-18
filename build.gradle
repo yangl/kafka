@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
 import org.ajoberstar.grgit.Grgit
-import org.gradle.api.JavaVersion
 
 import java.nio.charset.StandardCharsets
 
@@ -39,7 +39,7 @@ plugins {
   id 'org.nosphere.apache.rat' version "0.8.1"
   id "io.swagger.core.v3.swagger-gradle-plugin" version "${swaggerVersion}"
 
-  id "com.github.spotbugs" version '6.0.25' apply false
+  id "com.github.spotbugs" version '6.2.3' apply false
   id 'org.scoverage' version '8.0.3' apply false
   // Updating the shadow plugin version to 8.1.1 causes issue with signing and publishing the shadowed
   // artifacts - see https://github.com/johnrengelman/shadow/issues/901
@@ -47,12 +47,12 @@ plugins {
   //  Spotless 6.13.0 has issue with Java 21 (see https://github.com/diffplug/spotless/pull/1920), and Spotless 6.14.0+ requires JRE 11
   //  We are going to drop JDK8 support. Hence, the spotless is upgrade to newest version and be applied only if the build env is compatible with JDK 11.
   //  spotless 6.15.0+ has issue in runtime with JDK8 even through we define it with `apply:false`. see https://github.com/diffplug/spotless/issues/2156 for more details
-  id 'com.diffplug.spotless' version "6.14.0" apply false
+  id 'com.diffplug.spotless' version "6.25.0"
 }
 
 ext {
   gradleVersion = versions.gradle
-  minJavaVersion = 8
+  minJavaVersion = 17
   buildVersionFileName = "kafka-version.properties"
 
   defaultMaxHeapSize = "2g"
@@ -763,16 +763,16 @@ subprojects {
   //  the task `removeUnusedImports` is implemented by google-java-format,
   //  and unfortunately the google-java-format version used by spotless 6.14.0 can't work with JDK 21.
   //  Hence, we apply spotless tasks only if the env is either JDK11 or JDK17
-  if ((JavaVersion.current().isJava11() || (JavaVersion.current() == JavaVersion.VERSION_17))) {
-    apply plugin: 'com.diffplug.spotless'
-    spotless {
-      java {
-        targetExclude('src/generated/**/*.java','src/generated-test/**/*.java')
-        importOrder('kafka', 'org.apache.kafka', 'com', 'net', 'org', 'java', 'javax', '', '\\#')
-        removeUnusedImports()
-      }
+
+  apply plugin: 'com.diffplug.spotless'
+  spotless {
+    java {
+      targetExclude('src/generated/**/*.java','src/generated-test/**/*.java')
+      importOrder('kafka', 'org.apache.kafka', 'com', 'net', 'org', 'java', 'javax', '', '\\#')
+      removeUnusedImports()
     }
   }
+
 }
 
 gradle.taskGraph.whenReady { taskGraph ->

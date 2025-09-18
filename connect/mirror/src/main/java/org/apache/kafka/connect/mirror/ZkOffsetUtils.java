@@ -1,22 +1,25 @@
 package org.apache.kafka.connect.mirror;
 
+import org.apache.kafka.common.TopicPartition;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.Strings;
 import org.apache.curator.framework.CuratorFramework;
-import org.apache.kafka.common.TopicPartition;
 import org.apache.zookeeper.data.Stat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
-import java.util.Map;
-import java.util.OptionalLong;
+import java.util.*;
 
-import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.*;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.CONSUMERS_PATH;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.CONSUMER_IDS_PATH_FORMAT;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.CONSUMER_OFFSETS_PATH_FORMAT;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.CONSUMER_TOPIC_PARTITION_PATH_FORMAT;
 
 public class ZkOffsetUtils {
     private static final Logger log = LoggerFactory.getLogger(ZkOffsetUtils.class);

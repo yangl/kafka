@@ -49,16 +49,17 @@ public class SFMirrorMakerConstants {
 
 
     // 获取mm2消费组路径
-    public static final String getMM2ConsumerGroupIdsPath(String groupId) {
+    public static String getMM2ConsumerGroupIdsPath(String groupId) {
         return String.format(MM2_CONSUMER_IDS_PATH_FORMAT, groupId);
     }
 
     // 获取本机IP
-    public static final String getIp() {
+    public static String getIp() {
         String ip = "";
         try {
             ip = InetAddress.getLocalHost().getHostAddress();
         } catch (UnknownHostException e) {
+            // ignore
         }
 
         return ip;

@@ -1,14 +1,16 @@
 package org.apache.kafka.connect.mirror.rest.resources;
 
 import com.google.common.collect.Maps;
-import io.swagger.v3.oas.annotations.Operation;
+
+import java.util.Map;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
-import java.util.Map;
+
+import io.swagger.v3.oas.annotations.Operation;
 
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.LASTEST_SYNC_GROUPOFFSETS_TOPIC;
 import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.LASTEST_SYNC_GROUPOFFSETS_ZK;
