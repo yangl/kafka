@@ -1,0 +1,297 @@
+# MirrorMaker 2.0 生产环境JMX配置
+# 专门针对MM2的Connect框架优化
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+# 白名单 - 只收集关键指标以减少内存占用
+whitelistObjectNames:
+  # MirrorMaker 2.0 核心指标
+  - "kafka.connect.mirror:type=MirrorSourceConnector,target=*,topic=*,partition=*"
+  - "kafka.connect.mirror:type=MirrorCheckpointConnector,target=*,topic=*,partition=*"
+  - "kafka.connect.mirror:type=MirrorHeartbeatConnector,target=*"
+  # Connect Worker指标
+  - "kafka.connect:type=connect-worker-metrics"
+  - "kafka.connect:type=connect-worker-rebalance-metrics"
+  # Connector指标
+  - "kafka.connect:type=connector-metrics,connector=*"
+  - "kafka.connect:type=connector-task-metrics,connector=*,task=*"
+  - "kafka.connect:type=source-task-metrics,connector=*,task=*"
+  - "kafka.connect:type=sink-task-metrics,connector=*,task=*"
+  # Consumer/Producer指标
+  - "kafka.consumer:type=consumer-fetch-manager-metrics,client-id=*"
+  - "kafka.consumer:type=consumer-coordinator-metrics,client-id=*"
+  - "kafka.producer:type=producer-metrics,client-id=*"
+  # JVM关键指标
+  - "java.lang:type=Memory"
+  - "java.lang:type=GarbageCollector,name=*"
+  - "java.lang:type=Threading"
+
+rules:
+  # === MirrorMaker 2.0 复制延迟指标（最关键） ===
+
+  # 复制延迟 - 每个主题分区的延迟
+  - pattern: kafka.connect.mirror<type=MirrorSourceConnector, target=(.+), topic=(.+), partition=(.+)><>record-age-ms
+    name: kafka_mm2_replication_lag_ms
+    labels:
+      target_cluster: "$1"
+      topic: "$2"
+      partition: "$3"
+    help: "Age of the oldest record in the source topic partition (replication lag)"
+    type: GAUGE
+
+  # 复制延迟 - 最大延迟
+  - pattern: kafka.connect.mirror<type=MirrorSourceConnector, target=(.+), topic=(.+), partition=(.+)><>record-age-ms-max
+    name: kafka_mm2_replication_lag_ms_max
+    labels:
+      target_cluster: "$1"
+      topic: "$2"
+      partition: "$3"
+    help: "Maximum age of records in the source topic partition"
+    type: GAUGE
+
+  # 复制延迟 - 平均延迟
+  - pattern: kafka.connect.mirror<type=MirrorSourceConnector, target=(.+), topic=(.+), partition=(.+)><>record-age-ms-avg
+    name: kafka_mm2_replication_lag_ms_avg
+    labels:
+      target_cluster: "$1"
+      topic: "$2"
+      partition: "$3"
+    help: "Average age of records in the source topic partition"
+    type: GAUGE
+
+  # Consumer Lag (Records)
+  - pattern: kafka.consumer<type=consumer-fetch-manager-metrics, client-id=(.+), topic=(.+), partition=(.+)><>records-lag
+    name: kafka_mm2_consumer_records_lag
+    labels:
+      client_id: "$1"
+      topic: "$2"
+      partition: "$3"
+    help: "Records lag for MirrorMaker 2.0 consumer"
+    type: GAUGE
+
+  - pattern: kafka.consumer<type=consumer-fetch-manager-metrics, client-id=(.+), topic=(.+), partition=(.+)><>records-lag-max
+    name: kafka_mm2_consumer_records_lag_max
+    labels:
+      client_id: "$1"
+      topic: "$2"
+      partition: "$3"
+    help: "Maximum records lag for MirrorMaker 2.0 consumer"
+    type: GAUGE
+
+  # === MirrorMaker 2.0 吞吐量指标 ===
+
+  # 源记录处理速率
+  - pattern: kafka.connect.mirror<type=MirrorSourceConnector, target=(.+), topic=(.+), partition=(.+)><>source-record-poll-rate
+    name: kafka_mm2_source_record_poll_rate
+    labels:
+      target_cluster: "$1"
+      topic: "$2"
+      partition: "$3"
+    help: "Rate of records polled from source"
+    type: GAUGE
+
+  # 源记录处理总数
+  - pattern: kafka.connect.mirror<type=MirrorSourceConnector, target=(.+), topic=(.+), partition=(.+)><>source-record-poll-total
+    name: kafka_mm2_source_record_poll_total
+    labels:
+      target_cluster: "$1"
+      topic: "$2"
+      partition: "$3"
+    help: "Total records polled from source"
+    type: COUNTER
+
+  # 记录写入速率
+  - pattern: kafka.connect.mirror<type=MirrorSourceConnector, target=(.+), topic=(.+), partition=(.+)><>source-record-write-rate
+    name: kafka_mm2_source_record_write_rate
+    labels:
+      target_cluster: "$1"
+      topic: "$2"
+      partition: "$3"
+    help: "Rate of records written to target"
+    type: GAUGE
+
+  # 记录写入总数
+  - pattern: kafka.connect.mirror<type=MirrorSourceConnector, target=(.+), topic=(.+), partition=(.+)><>source-record-write-total
+    name: kafka_mm2_source_record_write_total
+    labels:
+      target_cluster: "$1"
+      topic: "$2"
+      partition: "$3"
+    help: "Total records written to target"
+    type: COUNTER
+
+  # === Checkpoint Connector指标 ===
+
+  # Checkpoint延迟
+  - pattern: kafka.connect.mirror<type=MirrorCheckpointConnector, target=(.+), topic=(.+), partition=(.+)><>checkpoint-latency-ms
+    name: kafka_mm2_checkpoint_latency_ms
+    labels:
+      target_cluster: "$1"
+      topic: "$2"
+      partition: "$3"
+    help: "Checkpoint replication latency in milliseconds"
+    type: GAUGE
+
+  # Checkpoint同步速率
+  - pattern: kafka.connect.mirror<type=MirrorCheckpointConnector, target=(.+)><>checkpoints-created-rate
+    name: kafka_mm2_checkpoints_created_rate
+    labels:
+      target_cluster: "$1"
+    help: "Rate of checkpoints created"
+    type: GAUGE
+
+  # === Heartbeat Connector指标 ===
+
+  # Heartbeat发送速率
+  - pattern: kafka.connect.mirror<type=MirrorHeartbeatConnector, target=(.+)><>heartbeats-sent-rate
+    name: kafka_mm2_heartbeats_sent_rate
+    labels:
+      target_cluster: "$1"
+    help: "Rate of heartbeats sent"
+    type: GAUGE
+
+  # Heartbeat延迟
+  - pattern: kafka.connect.mirror<type=MirrorHeartbeatConnector, target=(.+)><>heartbeat-latency-ms
+    name: kafka_mm2_heartbeat_latency_ms
+    labels:
+      target_cluster: "$1"
+    help: "Heartbeat latency in milliseconds"
+    type: GAUGE
+
+  # === Connect Worker指标 ===
+
+  # Worker状态
+  - pattern: kafka.connect<type=connect-worker-metrics><>(.+)
+    name: kafka_mm2_worker_$1
+    help: "Connect worker metrics"
+    type: GAUGE
+
+  # Rebalance指标
+  - pattern: kafka.connect<type=connect-worker-rebalance-metrics><>(.+)
+    name: kafka_mm2_worker_rebalance_$1
+    help: "Connect worker rebalance metrics"
+    type: GAUGE
+
+  # === Connector状态指标 ===
+
+  # Connector指标
+  - pattern: kafka.connect<type=connector-metrics, connector=(.+)><>(.+)
+    name: kafka_mm2_connector_$2
+    labels:
+      connector: "$1"
+    help: "Connector metrics"
+    type: GAUGE
+
+  # Task指标
+  - pattern: kafka.connect<type=connector-task-metrics, connector=(.+), task=(.+)><>(.+)
+    name: kafka_mm2_task_$3
+    labels:
+      connector: "$1"
+      task: "$2"
+    help: "Task metrics"
+    type: GAUGE
+
+  # Source Task指标
+  - pattern: kafka.connect<type=source-task-metrics, connector=(.+), task=(.+)><>(.+)
+    name: kafka_mm2_source_task_$3
+    labels:
+      connector: "$1"
+      task: "$2"
+    help: "Source task metrics"
+    type: GAUGE
+
+  # === Consumer指标 ===
+
+  # 消费速率
+  - pattern: kafka.consumer<type=consumer-fetch-manager-metrics, client-id=(.+)><>records-consumed-rate
+    name: kafka_mm2_consumer_records_consumed_rate
+    labels:
+      client_id: "$1"
+    help: "Consumer records consumed rate"
+    type: GAUGE
+
+  # 字节消费速率
+  - pattern: kafka.consumer<type=consumer-fetch-manager-metrics, client-id=(.+)><>bytes-consumed-rate
+    name: kafka_mm2_consumer_bytes_consumed_rate
+    labels:
+      client_id: "$1"
+    help: "Consumer bytes consumed rate"
+    type: GAUGE
+
+  # Fetch延迟
+  - pattern: kafka.consumer<type=consumer-fetch-manager-metrics, client-id=(.+)><>fetch-latency-(.+)
+    name: kafka_mm2_consumer_fetch_latency_$2
+    labels:
+      client_id: "$1"
+    help: "Consumer fetch latency"
+    type: GAUGE
+
+  # === Producer指标 ===
+
+  # 生产速率
+  - pattern: kafka.producer<type=producer-metrics, client-id=(.+)><>record-send-rate
+    name: kafka_mm2_producer_record_send_rate
+    labels:
+      client_id: "$1"
+    help: "Producer record send rate"
+    type: GAUGE
+
+  # 字节发送速率
+  - pattern: kafka.producer<type=producer-metrics, client-id=(.+)><>outgoing-byte-rate
+    name: kafka_mm2_producer_outgoing_byte_rate
+    labels:
+      client_id: "$1"
+    help: "Producer outgoing byte rate"
+    type: GAUGE
+
+  # 错误率
+  - pattern: kafka.producer<type=producer-metrics, client-id=(.+)><>record-error-rate
+    name: kafka_mm2_producer_record_error_rate
+    labels:
+      client_id: "$1"
+    help: "Producer record error rate"
+    type: GAUGE
+
+  # 重试率
+  - pattern: kafka.producer<type=producer-metrics, client-id=(.+)><>record-retry-rate
+    name: kafka_mm2_producer_record_retry_rate
+    labels:
+      client_id: "$1"
+    help: "Producer record retry rate"
+    type: GAUGE
+
+  # === JVM指标 ===
+
+  # 堆内存使用
+  - pattern: java.lang<type=Memory><HeapMemoryUsage>(.+)
+    name: jvm_heap_memory_$1
+    help: "JVM heap memory usage"
+    type: GAUGE
+
+  # 非堆内存使用
+  - pattern: java.lang<type=Memory><NonHeapMemoryUsage>(.+)
+    name: jvm_non_heap_memory_$1
+    help: "JVM non-heap memory usage"
+    type: GAUGE
+
+  # GC次数
+  - pattern: java.lang<type=GarbageCollector, name=(.+)><>CollectionCount
+    name: jvm_gc_collection_count_total
+    labels:
+      gc: "$1"
+    help: "GC collection count"
+    type: COUNTER
+
+  # GC时间
+  - pattern: java.lang<type=GarbageCollector, name=(.+)><>CollectionTime
+    name: jvm_gc_collection_time_milliseconds_total
+    labels:
+      gc: "$1"
+    help: "GC collection time"
+    type: COUNTER
+
+  # 线程数
+  - pattern: java.lang<type=Threading><>ThreadCount
+    name: jvm_thread_count
+    help: "JVM thread count"
+    type: GAUGE

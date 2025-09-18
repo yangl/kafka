@@ -52,7 +52,7 @@ plugins {
 
 ext {
   gradleVersion = versions.gradle
-  minJavaVersion = 17
+  minJavaVersion = 8
   buildVersionFileName = "kafka-version.properties"
 
   defaultMaxHeapSize = "2g"
