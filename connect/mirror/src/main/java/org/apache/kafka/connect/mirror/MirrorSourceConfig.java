@@ -104,6 +104,10 @@ public class MirrorSourceConfig extends MirrorConnectorConfig {
     private static final String OFFSET_LAG_MAX_DOC = "How out-of-sync a remote partition can be before it is resynced.";
     public static final long OFFSET_LAG_MAX_DEFAULT = 100L;
 
+    public static final String OFFSET_LAG_TIME_MAX_MS_CONFIG = "offset.lag.time.max.ms";
+    private static final long OFFSET_LAG_TIME_MAX_MS_DEFAULT = 60 * 1000L;
+    public static final String OFFSET_LAG_TIME_MAX_MS_DOC = "How long out-of-sync a remote partition can be before it is resynced.";
+
     public static final String ADD_SOURCE_ALIAS_TO_METRICS = "add.source.alias.to.metrics";
     private static final String ADD_SOURCE_ALIAS_TO_METRICS_DOC = "Deprecated. Whether to tag metrics with the source cluster alias. "
         + "Metrics have the target, topic and partition tags. When this setting is enabled, it adds the source tag. "
@@ -164,6 +168,11 @@ public class MirrorSourceConfig extends MirrorConnectorConfig {
     long maxOffsetLag() {
         return getLong(OFFSET_LAG_MAX);
     }
+
+    long offsetLagTimeMaxMs() {
+        return getLong(OFFSET_LAG_TIME_MAX_MS_CONFIG);
+    }
+
 
     Duration refreshTopicsInterval() {
         if (getBoolean(REFRESH_TOPICS_ENABLED)) {
@@ -335,6 +344,12 @@ public class MirrorSourceConfig extends MirrorConnectorConfig {
                         OFFSET_LAG_MAX_DEFAULT,
                         ConfigDef.Importance.LOW,
                         OFFSET_LAG_MAX_DOC)
+                .define(
+                        OFFSET_LAG_TIME_MAX_MS_CONFIG,
+                        ConfigDef.Type.LONG,
+                        OFFSET_LAG_TIME_MAX_MS_DEFAULT,
+                        ConfigDef.Importance.LOW,
+                        OFFSET_LAG_TIME_MAX_MS_DOC)
                 .define(
                         OFFSET_SYNCS_TOPIC_LOCATION,
                         ConfigDef.Type.STRING,

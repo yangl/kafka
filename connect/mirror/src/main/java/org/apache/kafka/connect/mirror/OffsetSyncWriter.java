@@ -21,15 +21,10 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.utils.Utils;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.Semaphore;
 
 /**
@@ -45,6 +40,7 @@ class OffsetSyncWriter implements AutoCloseable {
     private final KafkaProducer<byte[], byte[]> offsetProducer;
     private final String offsetSyncsTopic;
     private final long maxOffsetLag;
+    private final long maxOffsetLagTimeMs;
     private final Map<TopicPartition, PartitionState> partitionStates = new HashMap<>();
 
 
@@ -53,17 +49,19 @@ class OffsetSyncWriter implements AutoCloseable {
         offsetSyncsTopic = config.offsetSyncsTopic();
         offsetProducer = MirrorUtils.newProducer(config.offsetSyncsTopicProducerConfig());
         maxOffsetLag = config.maxOffsetLag();
+        maxOffsetLagTimeMs = config.offsetLagTimeMaxMs();
     }
 
     // Visible for testing
     public OffsetSyncWriter(KafkaProducer<byte[], byte[]> producer,
                             String offsetSyncsTopic,
                             Semaphore outstandingOffsetSyncs,
-                            long maxOffsetLag) {
+                            long maxOffsetLag, long maxOffsetLagTimeMs) {
         this.offsetProducer = producer;
         this.offsetSyncsTopic = offsetSyncsTopic;
         this.outstandingOffsetSyncs = outstandingOffsetSyncs;
         this.maxOffsetLag = maxOffsetLag;
+        this.maxOffsetLagTimeMs = maxOffsetLagTimeMs;
     }
 
     public void close() {
@@ -72,6 +70,10 @@ class OffsetSyncWriter implements AutoCloseable {
 
     public long maxOffsetLag() {
         return maxOffsetLag;
+    }
+
+    public long maxOffsetLagTimeMs() {
+        return maxOffsetLagTimeMs;
     }
 
     public Map<TopicPartition, PartitionState> partitionStates() {
@@ -126,7 +128,7 @@ class OffsetSyncWriter implements AutoCloseable {
     // updates partition state and queues up OffsetSync if necessary
     void maybeQueueOffsetSyncs(TopicPartition topicPartition, long upstreamOffset, long downstreamOffset) {
         PartitionState partitionState =
-                partitionStates.computeIfAbsent(topicPartition, x -> new PartitionState(maxOffsetLag));
+                partitionStates.computeIfAbsent(topicPartition, x -> new PartitionState(maxOffsetLag, maxOffsetLagTimeMs));
 
         OffsetSync offsetSync = new OffsetSync(topicPartition, upstreamOffset, downstreamOffset);
         if (partitionState.update(upstreamOffset, downstreamOffset)) {
@@ -158,11 +160,18 @@ class OffsetSyncWriter implements AutoCloseable {
         long previousUpstreamOffset = -1L;
         long previousDownstreamOffset = -1L;
         long lastSyncDownstreamOffset = -1L;
+        long lastSyncDownstreamOffsetTime = -1L;
         long maxOffsetLag;
+        long maxOffsetLagTimeMs;
         boolean shouldSyncOffsets;
 
         PartitionState(long maxOffsetLag) {
             this.maxOffsetLag = maxOffsetLag;
+        }
+
+        PartitionState(long maxOffsetLag, long maxOffsetLagTimeMs) {
+            this.maxOffsetLag = maxOffsetLag;
+            this.maxOffsetLagTimeMs = maxOffsetLagTimeMs;
         }
 
         // true if we should emit an offset sync
@@ -174,8 +183,10 @@ class OffsetSyncWriter implements AutoCloseable {
             boolean translatedOffsetTooStale = downstreamOffset - (lastSyncDownstreamOffset + 1) >= maxOffsetLag;
             boolean skippedUpstreamRecord = upstreamOffset - previousUpstreamOffset != 1L;
             boolean truncatedDownstreamTopic = downstreamOffset < previousDownstreamOffset;
-            if (noPreviousSyncThisLifetime || translatedOffsetTooStale || skippedUpstreamRecord || truncatedDownstreamTopic) {
+            boolean offsetSyncTooStale = System.currentTimeMillis() - lastSyncDownstreamOffsetTime >= maxOffsetLagTimeMs;
+            if (noPreviousSyncThisLifetime || translatedOffsetTooStale || skippedUpstreamRecord || truncatedDownstreamTopic || offsetSyncTooStale) {
                 lastSyncDownstreamOffset = downstreamOffset;
+                lastSyncDownstreamOffsetTime = System.currentTimeMillis();
                 shouldSyncOffsets = true;
             }
             previousUpstreamOffset = upstreamOffset;
