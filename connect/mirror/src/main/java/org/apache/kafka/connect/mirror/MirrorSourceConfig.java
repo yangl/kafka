@@ -104,9 +104,9 @@ public class MirrorSourceConfig extends MirrorConnectorConfig {
     private static final String OFFSET_LAG_MAX_DOC = "How out-of-sync a remote partition can be before it is resynced.";
     public static final long OFFSET_LAG_MAX_DEFAULT = 100L;
 
-    public static final String OFFSET_LAG_TIME_MAX_MS_CONFIG = "offset.lag.time.max.ms";
-    private static final long OFFSET_LAG_TIME_MAX_MS_DEFAULT = 60 * 1000L;
-    public static final String OFFSET_LAG_TIME_MAX_MS_DOC = "How long out-of-sync a remote partition can be before it is resynced.";
+    public static final String OFFSET_LAG_TIME_MAX_SECONDS_CONFIG = "offset.lag.time.max.seconds";
+    private static final long OFFSET_LAG_TIME_MAX_SECONDS_DEFAULT = 60;
+    public static final String OFFSET_LAG_TIME_MAX_SECONDS_DOC = "How long out-of-sync a remote partition can be before it is resynced.";
 
     public static final String ADD_SOURCE_ALIAS_TO_METRICS = "add.source.alias.to.metrics";
     private static final String ADD_SOURCE_ALIAS_TO_METRICS_DOC = "Deprecated. Whether to tag metrics with the source cluster alias. "
@@ -170,7 +170,7 @@ public class MirrorSourceConfig extends MirrorConnectorConfig {
     }
 
     long offsetLagTimeMaxMs() {
-        return getLong(OFFSET_LAG_TIME_MAX_MS_CONFIG);
+        return Duration.ofSeconds(getLong(OFFSET_LAG_TIME_MAX_SECONDS_CONFIG)).toMillis();
     }
 
 
@@ -345,11 +345,11 @@ public class MirrorSourceConfig extends MirrorConnectorConfig {
                         ConfigDef.Importance.LOW,
                         OFFSET_LAG_MAX_DOC)
                 .define(
-                        OFFSET_LAG_TIME_MAX_MS_CONFIG,
+                        OFFSET_LAG_TIME_MAX_SECONDS_CONFIG,
                         ConfigDef.Type.LONG,
-                        OFFSET_LAG_TIME_MAX_MS_DEFAULT,
+                        OFFSET_LAG_TIME_MAX_SECONDS_DEFAULT,
                         ConfigDef.Importance.LOW,
-                        OFFSET_LAG_TIME_MAX_MS_DOC)
+                        OFFSET_LAG_TIME_MAX_SECONDS_DOC)
                 .define(
                         OFFSET_SYNCS_TOPIC_LOCATION,
                         ConfigDef.Type.STRING,
