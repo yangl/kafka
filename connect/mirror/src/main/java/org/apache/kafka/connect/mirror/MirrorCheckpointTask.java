@@ -536,7 +536,7 @@ public class MirrorCheckpointTask extends SourceTask {
             } catch (Exception e) {
                 // ignore
             }
-            log.info("当前task不是leader, 不执行zk offset同步, 当前leader -> {}", leaderId);
+            log.debug("当前task不是leader, 不执行zk offset同步, 当前leader -> {}", leaderId);
         }
 
     }

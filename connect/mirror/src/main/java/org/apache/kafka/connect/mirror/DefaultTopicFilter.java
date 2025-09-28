@@ -26,13 +26,12 @@ import org.apache.kafka.common.utils.ConfigUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.regex.Pattern;
 
 import static org.apache.kafka.connect.mirror.MirrorUtils.adminCall;
+import static org.apache.kafka.connect.mirror.SFMirrorMakerConstants.MM2_AUTO_CREATE_TOPICS_ENABLED_KEY;
 
 /** Uses an include and exclude pattern. */
 public class DefaultTopicFilter implements TopicFilter {
@@ -76,7 +75,7 @@ public class DefaultTopicFilter implements TopicFilter {
         sourceClusterAlias = taskConfig.sourceClusterAlias();
         replicationPolicy = taskConfig.replicationPolicy();
         targetAdminClient = taskConfig.forwardingAdmin(taskConfig.targetAdminConfig("topic-filter-target-admin"));
-        refreshTopicsIntervalMs = taskConfig.refreshTopicsInterval().minusSeconds(30).toMillis();
+        refreshTopicsIntervalMs = taskConfig.refreshTopicsInterval().minusSeconds(20).toMillis();
 
         this.refreshTargetTopics();
     }
@@ -93,18 +92,20 @@ public class DefaultTopicFilter implements TopicFilter {
     public boolean shouldReplicateTopic(String topic) {
         boolean contains = true;
 
-        boolean autoCreateTopicsEnabled = Boolean.parseBoolean(System.getProperty("MM2_AUTO_CREATE_TOPICS_ENABLE", "true"));
+        boolean autoCreateTopicsEnabled = Boolean.parseBoolean(System.getProperty(MM2_AUTO_CREATE_TOPICS_ENABLED_KEY, "true"));
         if (!autoCreateTopicsEnabled) {
-            String targetTopic = replicationPolicy.formatRemoteTopic(sourceClusterAlias, topic);
 
-            if (targetTopics == null || (refreshTopicsIntervalMs > 0 && System.currentTimeMillis() - lastRefreshTargetTopicsTimestamp > refreshTopicsIntervalMs)) {
+            if (targetTopics == null || (refreshTopicsIntervalMs > 0 
+                    && System.currentTimeMillis() - lastRefreshTargetTopicsTimestamp > Math.max(60_000, refreshTopicsIntervalMs))) {
                 this.refreshTargetTopics();
             }
+
+            String targetTopic = replicationPolicy.formatRemoteTopic(sourceClusterAlias, topic);
 
             contains = targetTopics != null && targetTopics.contains(targetTopic);
 
             if (!contains) {
-                log.info("下游集群没有该主题--{} -> {}", topic, targetTopic);
+                log.warn("下游集群没有该主题--{} -> {}", topic, targetTopic);
             }
 
         }
@@ -114,8 +115,6 @@ public class DefaultTopicFilter implements TopicFilter {
 
     @Override
     public void close() {
-        log.info("关闭时清理资源--targetAdminClient&targetTopics");
-
         if (targetAdminClient != null) {
             targetAdminClient.close();
         }
@@ -129,24 +128,17 @@ public class DefaultTopicFilter implements TopicFilter {
     }
 
     private void refreshTargetTopics() {
-        long startTime = System.currentTimeMillis();
-
-        log.info("刷新下游集群主题列表开始");
-
         try {
-            long now = System.currentTimeMillis();
             Set<String> topics = adminCall(() -> targetAdminClient.listTopics().names().get(), () -> "list topics on target cluster");
             synchronized (this) {
                 this.targetTopics = topics;
-                this.lastRefreshTargetTopicsTimestamp = now;
+                this.lastRefreshTargetTopicsTimestamp = System.currentTimeMillis();
             }
+            log.info("刷新下游集群主题列表成功");
 
         } catch (ExecutionException | InterruptedException e) {
             log.warn("获取目标集群主题列表失败", e);
         }
-
-        log.info("刷新下游集群主题列表结束, 耗时 {}", System.currentTimeMillis() - startTime);
-
     }
 
     static class TopicFilterConfig extends AbstractConfig {
