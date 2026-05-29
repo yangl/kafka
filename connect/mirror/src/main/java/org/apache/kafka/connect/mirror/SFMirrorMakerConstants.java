@@ -21,8 +21,8 @@ public class SFMirrorMakerConstants {
     public static final String CONSUMER_TOPIC_PARTITION_PATH_FORMAT = "/consumers/%s/offsets/%s/%d";
 
     public static final String MM2_CONSUMER_IDS_PATH_FORMAT = "/mm2-sync/data/%s/ids";
-    public static final String MM2_OFFSETS_IDS_PATH_FORMAT = "/mm2-sync/offsets/ids";
-    public static final String MM2_OFFSETS_LATCH_PATH_FORMAT = "/mm2-sync/offsets/latch";
+    public static final String MM2_OFFSETS_IDS_PATH_FORMAT = "/mm2-sync/offsets/%s/ids";
+    public static final String MM2_OFFSETS_LATCH_PATH_FORMAT = "/mm2-sync/offsets/%s/latch";
 
     public static final String MM2_CONSUMER_GROUP_ID_KEY = "mm2.consumer.group.id";
 
@@ -51,6 +51,16 @@ public class SFMirrorMakerConstants {
     // 获取mm2消费组路径
     public static String getMM2ConsumerGroupIdsPath(String groupId) {
         return String.format(MM2_CONSUMER_IDS_PATH_FORMAT, groupId);
+    }
+
+    // 获取mm2 offsets同步任务注册路径
+    public static String getMM2OffsetsIdsPath(String groupId) {
+        return String.format(MM2_OFFSETS_IDS_PATH_FORMAT, groupId);
+    }
+
+    // 获取mm2 offsets同步leader选举路径
+    public static String getMM2OffsetsLatchPath(String groupId) {
+        return String.format(MM2_OFFSETS_LATCH_PATH_FORMAT, groupId);
     }
 
     // 获取本机IP

@@ -88,6 +88,7 @@ public class MirrorCheckpointTask extends SourceTask {
 
     private String taskId;
     private boolean syncZkOffsetEnabled;
+    private String sfMm2ConsumerGroupId;
 
     public MirrorCheckpointTask() {}
 
@@ -156,6 +157,7 @@ public class MirrorCheckpointTask extends SourceTask {
 
         taskId = getIp() + "-" + UUID.randomUUID();
         syncZkOffsetEnabled = Boolean.parseBoolean(System.getProperty(MM2_OFFSET_ZK_ENABLED_KEY, "false"));
+        sfMm2ConsumerGroupId = System.getProperty(MM2_CONSUMER_GROUP_ID_KEY);
         checkBidirectionSync();
         registerOffsetsSyncJobInZK();
 
@@ -472,11 +474,12 @@ public class MirrorCheckpointTask extends SourceTask {
         }
 
         try {
+            String offsetsIdsPath = getMM2OffsetsIdsPath(sfMm2ConsumerGroupId);
             sourceZkClient.create().orSetData().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
-                    .forPath(MM2_OFFSETS_IDS_PATH_FORMAT + "/" + taskId, taskId.getBytes(StandardCharsets.UTF_8));
+                    .forPath(offsetsIdsPath + "/" + taskId, taskId.getBytes(StandardCharsets.UTF_8));
 
             // 选举一个task点运行zk同步
-            String latchPath = MM2_OFFSETS_LATCH_PATH_FORMAT;
+            String latchPath = getMM2OffsetsLatchPath(sfMm2ConsumerGroupId);
             Stat stat = sourceZkClient.checkExists().forPath(latchPath);
             if (stat == null) {
                 sourceZkClient.create().creatingParentsIfNeeded().forPath(latchPath);
@@ -500,9 +503,10 @@ public class MirrorCheckpointTask extends SourceTask {
         }
 
         try {
-            Stat stat = targetZkClient.checkExists().forPath(MM2_OFFSETS_IDS_PATH_FORMAT);
+            String offsetsIdsPath = getMM2OffsetsIdsPath(sfMm2ConsumerGroupId);
+            Stat stat = targetZkClient.checkExists().forPath(offsetsIdsPath);
             if (stat != null) {
-                List<String> ids = targetZkClient.getChildren().forPath(MM2_OFFSETS_IDS_PATH_FORMAT);
+                List<String> ids = targetZkClient.getChildren().forPath(offsetsIdsPath);
                 if (ids != null && !ids.isEmpty()) {
                     System.err.println("offsets循环同步了！请确认下游集群ZKOFFSETS同步消费组是否还在运行中？");
                     Exit.exit(14);
